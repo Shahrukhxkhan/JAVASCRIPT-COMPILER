@@ -1,0 +1,5 @@
+{
+  "name": "JS Compiler IDE",
+  "description": "A fully functional educational JavaScript compiler built from scratch. Features a complete pipeline: Lexer, Parser, Semantic Analysis, IR, Optimization, Bytecode Generation, and a Stack-based VM.",
+  "requestFramePermissions": []
+}
