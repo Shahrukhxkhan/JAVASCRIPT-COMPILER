@@ -26,9 +26,8 @@ export function generateIR(ast: Program): Quadruple[] {
         return null;
 
       case ASTNodeType.Literal:
-        // Immediate value, strictly speaking for Quadruples we might load to temp, 
-        // but often we just return the value string if it's a number
-        return node.value.toString();
+        // Use JSON.stringify to keep quotes for strings and format numbers correctly
+        return JSON.stringify(node.value);
 
       case ASTNodeType.Identifier:
         return node.value;

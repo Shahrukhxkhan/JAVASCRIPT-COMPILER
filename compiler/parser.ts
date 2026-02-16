@@ -99,14 +99,11 @@ export class Parser {
   }
 
   private printStatement(): ASTNode {
-    // Treat 'print' as a built-in statement for simpler codegen/VM
     this.consume(TokenType.Punctuation, '(', "Expected '(' after print.");
     const argument = this.expression();
     this.consume(TokenType.Punctuation, ')', "Expected ')' after print argument.");
     this.consume(TokenType.Punctuation, ';', "Expected ';' after print statement.");
     
-    // Represent print as a CallExpression for consistency or a custom node
-    // Let's use a specialized CallExpression to a native 'print'
     return {
         type: ASTNodeType.ExpressionStatement,
         expression: {
@@ -238,26 +235,16 @@ export class Parser {
     throw new Error(`Parse error at token: ${this.peek().value}`);
   }
 
-  // Helpers
-  private match(...types: any[]): boolean {
-    for (const type of types) {
-      if (this.check(type)) {
-        this.advance();
-        return true;
-      }
-    }
-    if (arguments.length === 2 && typeof arguments[1] === 'string') {
-        // match(TokenType, Value) overload check
-        if (this.check(arguments[0], arguments[1])) {
-            this.advance();
-            return true;
-        }
+  private match(type: TokenType, value?: string): boolean {
+    if (this.check(type, value)) {
+      this.advance();
+      return true;
     }
     return false;
   }
 
   private matchKeyword(keyword: string): boolean {
-    if (this.check(TokenType.Keyword) && this.peek().value === keyword) {
+    if (this.check(TokenType.Keyword, keyword)) {
       this.advance();
       return true;
     }
@@ -268,7 +255,7 @@ export class Parser {
     if (this.isAtEnd()) return false;
     const token = this.peek();
     if (token.type !== type) return false;
-    if (value && token.value !== value) return false;
+    if (value !== undefined && token.value !== value) return false;
     return true;
   }
 
@@ -289,8 +276,6 @@ export class Parser {
     return this.tokens[this.current - 1];
   }
 
-  private consume(type: TokenType, message: string): Token;
-  private consume(type: TokenType, value: string, message: string): Token;
   private consume(type: TokenType, arg2: string, arg3?: string): Token {
       const value = arg3 ? arg2 : undefined;
       const message = arg3 ? arg3 : arg2;

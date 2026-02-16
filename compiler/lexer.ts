@@ -26,6 +26,15 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
+    // Comments (Single line: //)
+    if (char === '/' && source[current + 1] === '/') {
+      while (current < source.length && source[current] !== '\n') {
+        current++;
+        column++;
+      }
+      continue;
+    }
+
     // Numbers
     if (/[0-9]/.test(char)) {
       let value = '';
@@ -86,7 +95,7 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    if (/[(){};,.]/.test(char)) {
+    if (/[(){};,.:]/.test(char)) {
       tokens.push({ type: TokenType.Punctuation, value: char, line, column });
       current++;
       column++;
