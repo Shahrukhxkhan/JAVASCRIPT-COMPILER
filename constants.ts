@@ -44,6 +44,7 @@ export enum OpCode {
   GTE = 'GTE',           // Greater than or equal
   LOAD = 'LOAD',         // Load variable from current scope chain
   STORE = 'STORE',       // Store variable in current scope
+  DEFINE = 'DEFINE',     // Define variable in current scope only
   STORE_OUTER = 'STORE_OUTER', // Assign into already-defined outer scope var
   JMP = 'JMP',           // Jump unconditionally
   JMP_FALSE = 'JMP_FALSE', // Jump if top of stack is falsey

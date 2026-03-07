@@ -86,6 +86,11 @@ export function generateBytecode(ir: Quadruple[]): Instruction[] {
         break;
 
       // ── Assignment & variables ──
+      case 'DEFINE_VAR':
+        pushOperand(q.arg1, sl);
+        inst(OpCode.DEFINE, q.result, sl);
+        break;
+
       case 'ASSIGN':
         pushOperand(q.arg1, sl);
         inst(OpCode.STORE, q.result, sl);
@@ -139,6 +144,10 @@ export function generateBytecode(ir: Quadruple[]): Instruction[] {
 
       case 'ARG':
         if (q.result) inst(OpCode.STORE, q.result, sl);
+        break;
+
+      case 'DEFINE_ARG':
+        if (q.result) inst(OpCode.DEFINE, q.result, sl);
         break;
 
       case 'RETURN':

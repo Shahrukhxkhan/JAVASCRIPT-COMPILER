@@ -89,6 +89,12 @@ export class VM {
             this.stack.push(this.load(inst.operand));
             break;
 
+          case OpCode.DEFINE: {
+            const val = this.safePop('DEFINE');
+            this.envStack[this.envStack.length - 1].set(inst.operand, val);
+            break;
+          }
+
           case OpCode.STORE: {
             const val = this.safePop('STORE');
             this.store(inst.operand, val);
@@ -278,9 +284,18 @@ export class VM {
           case OpCode.OBJ_GET: {
             const key = this.safePop('OBJ_GET') as string;
             const obj = this.safePop('OBJ_GET');
-            if (obj !== null && typeof obj === 'object' && !Array.isArray(obj)) {
-              const v = (obj as Record<string, JsValue>)[key];
-              this.stack.push(v !== undefined ? v : null);
+
+            if (obj !== null && typeof obj === 'object') {
+              if (Array.isArray(obj) && key === 'length') {
+                this.stack.push(obj.length);
+              } else if (!Array.isArray(obj)) {
+                const v = (obj as Record<string, JsValue>)[key];
+                this.stack.push(v !== undefined ? v : null);
+              } else {
+                throw new Error(`Cannot read property '${key}' of array${linePrefix}.`);
+              }
+            } else if (typeof obj === 'string' && key === 'length') {
+              this.stack.push(obj.length);
             } else {
               throw new Error(`Cannot read property '${key}' of ${this.fmt(obj)}${linePrefix}.`);
             }

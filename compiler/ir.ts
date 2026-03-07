@@ -38,7 +38,9 @@ export function generateIR(ast: Program): Quadruple[] {
       case ASTNodeType.VariableDeclaration:
         if (node.init) {
           const val = gen(node.init);
-          emit('ASSIGN', val, null, node.name, line);
+          emit('DEFINE_VAR', val, null, node.name, line);
+        } else {
+          emit('DEFINE_VAR', 'null', null, node.name, line);
         }
         return null;
 
@@ -239,7 +241,7 @@ export function generateIR(ast: Program): Quadruple[] {
         emit('GOTO', null, null, funcEndLabel, line);
         emit('FUNC_START', null, null, node.name, line);
         emit('ENTER_SCOPE', null, null, null, line);
-        node.params.forEach((p: string) => emit('ARG', null, null, p, line));
+        node.params.forEach((p: string) => emit('DEFINE_ARG', null, null, p, line));
         gen(node.body);
         emit('RETURN', '0', null, null, line);
         emit('FUNC_END', null, null, node.name, line);
