@@ -129,13 +129,8 @@ const App: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="w-4 h-4 rounded-full bg-blue-500 shadow-lg shadow-blue-500/50"></div>
           <h1 className="font-bold text-lg tracking-tight">
-            JS Compiler <span className="text-gray-500 font-normal text-sm">from scratch</span>
+            JS Compiler
           </h1>
-          <div className="flex gap-1 ml-3 text-xs">
-            {['loops', 'closures', 'arrays', 'objects', 'error-recovery', 'source-maps'].map(f => (
-              <span key={f} className="bg-blue-900/40 text-blue-300 border border-blue-700/50 px-2 py-0.5 rounded-full">{f}</span>
-            ))}
-          </div>
         </div>
         <button
           onClick={handleCompile}
@@ -164,8 +159,8 @@ const App: React.FC = () => {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === tab.id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                   }`}
               >
                 {tab.label}

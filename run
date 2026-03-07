@@ -1,0 +1,1 @@
+cmd /c "cd /d c:\Users\user\Desktop\py\JAVASCRIPT-COMPILER && npm run dev"
