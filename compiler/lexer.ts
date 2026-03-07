@@ -2,7 +2,8 @@ import { Token } from '../types';
 import { TokenType } from '../constants';
 
 const KEYWORDS = new Set([
-  'let', 'const', 'function', 'if', 'else', 'return', 'print'
+  'let', 'const', 'function', 'if', 'else', 'return', 'print',
+  'while', 'for', 'break', 'continue', 'true', 'false', 'null'
 ]);
 
 export function tokenize(source: string): Token[] {
@@ -35,28 +36,30 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    // Numbers
+    // Numbers (integer and float)
     if (/[0-9]/.test(char)) {
       let value = '';
-      while (current < source.length && /[0-9]/.test(source[current])) {
+      const startCol = column;
+      while (current < source.length && /[0-9.]/.test(source[current])) {
         value += source[current];
         current++;
         column++;
       }
-      tokens.push({ type: TokenType.Number, value, line, column });
+      tokens.push({ type: TokenType.Number, value, line, column: startCol });
       continue;
     }
 
     // Identifiers and Keywords
-    if (/[a-zA-Z_]/.test(char)) {
+    if (/[a-zA-Z_$]/.test(char)) {
       let value = '';
-      while (current < source.length && /[a-zA-Z0-9_]/.test(source[current])) {
+      const startCol = column;
+      while (current < source.length && /[a-zA-Z0-9_$]/.test(source[current])) {
         value += source[current];
         current++;
         column++;
       }
       const type = KEYWORDS.has(value) ? TokenType.Keyword : TokenType.Identifier;
-      tokens.push({ type, value, line, column });
+      tokens.push({ type, value, line, column: startCol });
       continue;
     }
 
@@ -64,45 +67,58 @@ export function tokenize(source: string): Token[] {
     if (char === '"' || char === "'") {
       const quote = char;
       let value = '';
+      const startCol = column;
       current++; // skip open quote
       column++;
       while (current < source.length && source[current] !== quote) {
-        value += source[current];
+        if (source[current] === '\\') {
+          current++;
+          column++;
+          const esc = source[current];
+          value += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc;
+        } else {
+          value += source[current];
+        }
         current++;
         column++;
       }
       current++; // skip close quote
       column++;
-      tokens.push({ type: TokenType.String, value, line, column });
+      tokens.push({ type: TokenType.String, value, line, column: startCol });
       continue;
     }
 
-    // Punctuation and Operators
-    const twoCharMap: Record<string, boolean> = { '==': true, '<=': true, '>=': true, '!=': true };
+    // Three-char operators
+    const threeChar = source.slice(current, current + 3);
+    if (threeChar === '===' || threeChar === '!==') {
+      tokens.push({ type: TokenType.Operator, value: threeChar, line, column });
+      current += 3; column += 3;
+      continue;
+    }
+
+    // Two-char operators
     const twoChar = source.slice(current, current + 2);
-
-    if (twoCharMap[twoChar]) {
+    if (['==', '!=', '<=', '>=', '++', '--', '&&', '||'].includes(twoChar)) {
       tokens.push({ type: TokenType.Operator, value: twoChar, line, column });
-      current += 2;
-      column += 2;
+      current += 2; column += 2;
       continue;
     }
 
-    if (/[+\-*/=<>]/.test(char)) {
+    // Single-char operators
+    if (/[+\-*/=<>!%]/.test(char)) {
       tokens.push({ type: TokenType.Operator, value: char, line, column });
-      current++;
-      column++;
+      current++; column++;
       continue;
     }
 
-    if (/[(){};,.:]/.test(char)) {
+    // Punctuation (including square brackets for arrays)
+    if (/[(){};,.:[\]]/.test(char)) {
       tokens.push({ type: TokenType.Punctuation, value: char, line, column });
-      current++;
-      column++;
+      current++; column++;
       continue;
     }
 
-    throw new Error(`Unexpected character: ${char} at ${line}:${column}`);
+    throw new Error(`Unexpected character: '${char}' at ${line}:${column}`);
   }
 
   tokens.push({ type: TokenType.EOF, value: 'EOF', line, column });
