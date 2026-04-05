@@ -3,7 +3,8 @@ import { TokenType } from '../constants';
 
 const KEYWORDS = new Set([
   'let', 'const', 'var', 'function', 'if', 'else', 'return', 'print',
-  'while', 'for', 'try', 'catch', 'finally', 'class', 'extends',
+  'while', 'do', 'for', 'break', 'continue', 'switch', 'case', 'default',
+  'try', 'catch', 'finally', 'class', 'extends',
   'async', 'await', 'throw', 'new', 'this', 'super', 'true', 'false', 'null', 'undefined'
 ]);
 
@@ -153,10 +154,21 @@ export function tokenize(source: string): Token[] {
     }
 
     // Punctuation and Operators
+    const threeCharMap: Record<string, boolean> = {
+      '===': true, '!==': true
+    };
+    const threeChar = source.slice(current, current + 3);
+    if (threeCharMap[threeChar]) {
+      tokens.push({ type: TokenType.Operator, value: threeChar, line, column });
+      current += 3;
+      column += 3;
+      continue;
+    }
+
     const twoCharMap: Record<string, boolean> = { 
       '==': true, '<=': true, '>=': true, '!=': true,
       '=>': true, '++': true, '--': true, '+=': true,
-      '-=': true, '*=': true, '/=': true
+      '-=': true, '*=': true, '/=': true, '&&': true, '||': true
     };
     const twoChar = source.slice(current, current + 2);
 
@@ -167,7 +179,7 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    if (/[+\-*/=<>]/.test(char)) {
+    if (/[+\-*/=<>!&|?:%]/.test(char)) {
       tokens.push({ type: TokenType.Operator, value: char, line, column });
       current++;
       column++;

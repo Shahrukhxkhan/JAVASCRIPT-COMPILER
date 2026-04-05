@@ -17,8 +17,10 @@ export function generateIR(ast: Program): Quadruple[] {
   tempCounter = 0;
   labelCounter = 0;
   const ir: Quadruple[] = [];
+  const loopStack: { start: string, end: string }[] = [];
 
   function gen(node: ASTNode): string | null {
+    if (!node) return null;
     switch (node.type) {
       case ASTNodeType.Program:
       case ASTNodeType.BlockStatement:
@@ -98,29 +100,121 @@ export function generateIR(ast: Program): Quadruple[] {
       case ASTNodeType.WhileStatement: {
         const startLabel = newLabel();
         const endLabel = newLabel();
+        loopStack.push({ start: startLabel, end: endLabel });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
         const condition = gen(node.test);
         ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: endLabel });
         gen(node.body);
         ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        loopStack.pop();
+        return null;
+      }
+
+      case ASTNodeType.DoWhileStatement: {
+        const startLabel = newLabel();
+        const continueLabel = newLabel();
+        const endLabel = newLabel();
+        loopStack.push({ start: continueLabel, end: endLabel });
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
+        gen(node.body);
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: continueLabel });
+        const condition = gen(node.test);
+        ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: endLabel });
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        loopStack.pop();
         return null;
       }
 
       case ASTNodeType.ForStatement: {
         if (node.init) gen(node.init);
         const startLabel = newLabel();
+        const continueLabel = newLabel();
         const endLabel = newLabel();
+        loopStack.push({ start: continueLabel, end: endLabel });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
         if (node.test) {
           const condition = gen(node.test);
           ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: endLabel });
         }
         gen(node.body);
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: continueLabel });
         if (node.update) gen(node.update);
         ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        loopStack.pop();
         return null;
+      }
+
+      case ASTNodeType.BreakStatement: {
+        if (loopStack.length > 0) {
+          const endLabel = loopStack[loopStack.length - 1].end;
+          ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: endLabel });
+        }
+        return null;
+      }
+
+      case ASTNodeType.ContinueStatement: {
+        if (loopStack.length > 0) {
+          const startLabel = loopStack[loopStack.length - 1].start;
+          ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
+        }
+        return null;
+      }
+
+      case ASTNodeType.SwitchStatement: {
+        const discriminant = gen(node.discriminant);
+        const endLabel = newLabel();
+        loopStack.push({ start: endLabel, end: endLabel }); // break goes to endLabel
+        
+        const caseLabels = node.cases.map(() => newLabel());
+        let defaultLabel = endLabel;
+        let defaultIndex = -1;
+
+        // Generate condition checks
+        node.cases.forEach((c: ASTNode, i: number) => {
+          if (c.test) {
+            const testVal = gen(c.test);
+            const cmpTemp = newTemp();
+            ir.push({ line: c.line, column: c.column, op: 'EQ', arg1: discriminant, arg2: testVal, result: cmpTemp });
+            ir.push({ line: c.line, column: c.column, op: 'IF_TRUE_GOTO', arg1: cmpTemp, arg2: null, result: caseLabels[i] });
+          } else {
+            defaultLabel = caseLabels[i];
+            defaultIndex = i;
+          }
+        });
+
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: defaultLabel });
+
+        // Generate case bodies
+        node.cases.forEach((c: ASTNode, i: number) => {
+          ir.push({ line: c.line, column: c.column, op: 'LABEL', arg1: null, arg2: null, result: caseLabels[i] });
+          c.consequent.forEach((stmt: ASTNode) => gen(stmt));
+        });
+
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        loopStack.pop();
+        return null;
+      }
+
+      case ASTNodeType.ConditionalExpression: {
+        const condition = gen(node.test);
+        const elseLabel = newLabel();
+        const endLabel = newLabel();
+        const resultTemp = newTemp();
+        
+        ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: elseLabel });
+        const consVal = gen(node.consequent);
+        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: consVal, arg2: null, result: resultTemp });
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: endLabel });
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: elseLabel });
+        const altVal = gen(node.alternate);
+        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: altVal, arg2: null, result: resultTemp });
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        return resultTemp;
       }
 
       case ASTNodeType.TryStatement: {
@@ -179,8 +273,15 @@ export function generateIR(ast: Program): Quadruple[] {
             case '*': opCode = 'MUL'; break;
             case '/': opCode = 'DIV'; break;
             case '==': opCode = 'EQ'; break;
+            case '!=': opCode = 'NEQ'; break;
+            case '===': opCode = 'EQ_STRICT'; break;
+            case '!==': opCode = 'NEQ_STRICT'; break;
             case '>': opCode = 'GT'; break;
             case '<': opCode = 'LT'; break;
+            case '>=': opCode = 'GTE'; break;
+            case '<=': opCode = 'LTE'; break;
+            case '&&': opCode = 'AND'; break;
+            case '||': opCode = 'OR'; break;
             default: opCode = 'UNKNOWN';
         }
         ir.push({ line: node.line, column: node.column, op: opCode, arg1: t1, arg2: t2, result: temp });

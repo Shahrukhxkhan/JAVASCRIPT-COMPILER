@@ -40,6 +40,8 @@ export function analyze(ast: Program): SemanticError[] {
   symbolTable.define('console', 'const');
   symbolTable.define('Symbol', 'const');
 
+  let loopDepth = 0;
+
   // Revised Traversal for specific nodes to prevent false positives on declaration names
   function walk(node: ASTNode) {
      if(!node) return;
@@ -70,7 +72,10 @@ export function analyze(ast: Program): SemanticError[] {
          }
          symbolTable.enterScope();
          node.params.forEach((p: string) => symbolTable.define(p, 'let'));
+         const prevLoopDepth = loopDepth;
+         loopDepth = 0; // Functions have their own loop context
          walk(node.body);
+         loopDepth = prevLoopDepth;
          symbolTable.exitScope();
      } else if (node.type === ASTNodeType.ClassDeclaration) {
          if(!symbolTable.define(node.name, 'const')) {
@@ -83,6 +88,34 @@ export function analyze(ast: Program): SemanticError[] {
          symbolTable.enterScope();
          node.body.forEach(walk);
          symbolTable.exitScope();
+     } else if (node.type === ASTNodeType.CatchClause) {
+         symbolTable.enterScope();
+         if (node.param) symbolTable.define(node.param, 'let');
+         walk(node.body);
+         symbolTable.exitScope();
+     } else if (node.type === ASTNodeType.WhileStatement || node.type === ASTNodeType.DoWhileStatement || node.type === ASTNodeType.ForStatement) {
+         loopDepth++;
+         if (node.type === ASTNodeType.ForStatement) {
+             symbolTable.enterScope();
+             if (node.init) walk(node.init);
+             if (node.test) walk(node.test);
+             if (node.update) walk(node.update);
+             walk(node.body);
+             symbolTable.exitScope();
+         } else {
+             if (node.test) walk(node.test);
+             walk(node.body);
+         }
+         loopDepth--;
+     } else if (node.type === ASTNodeType.SwitchStatement) {
+         loopDepth++; // switch statements can contain break
+         walk(node.discriminant);
+         node.cases.forEach(walk);
+         loopDepth--;
+     } else if (node.type === ASTNodeType.BreakStatement || node.type === ASTNodeType.ContinueStatement) {
+         if (loopDepth === 0) {
+             errors.push({ message: `Illegal '${node.type === ASTNodeType.BreakStatement ? 'break' : 'continue'}' statement outside of a loop or switch.`, line: node.line, column: node.column });
+         }
      } else if (node.type === ASTNodeType.Identifier) {
          if(!symbolTable.resolve(node.value)) {
              errors.push({ message: `Undeclared identifier '${node.value}'.`, line: node.line, column: node.column });

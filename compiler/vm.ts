@@ -119,7 +119,25 @@ export class VM {
           case OpCode.EQ: {
               const b = this.safePop(inst, 'equality check (EQ)');
               const a = this.safePop(inst, 'equality check (EQ)');
+              this.stack.push(a == b);
+              break;
+          }
+          case OpCode.NEQ: {
+              const b = this.safePop(inst, 'inequality check (NEQ)');
+              const a = this.safePop(inst, 'inequality check (NEQ)');
+              this.stack.push(a != b);
+              break;
+          }
+          case OpCode.EQ_STRICT: {
+              const b = this.safePop(inst, 'strict equality check (EQ_STRICT)');
+              const a = this.safePop(inst, 'strict equality check (EQ_STRICT)');
               this.stack.push(a === b);
+              break;
+          }
+          case OpCode.NEQ_STRICT: {
+              const b = this.safePop(inst, 'strict inequality check (NEQ_STRICT)');
+              const a = this.safePop(inst, 'strict inequality check (NEQ_STRICT)');
+              this.stack.push(a !== b);
               break;
           }
           case OpCode.LT: {
@@ -132,6 +150,30 @@ export class VM {
               const b = this.safePop(inst, 'greater-than check (GT)');
               const a = this.safePop(inst, 'greater-than check (GT)');
               this.stack.push(a > b);
+              break;
+          }
+          case OpCode.LTE: {
+              const b = this.safePop(inst, 'less-than-or-equal check (LTE)');
+              const a = this.safePop(inst, 'less-than-or-equal check (LTE)');
+              this.stack.push(a <= b);
+              break;
+          }
+          case OpCode.GTE: {
+              const b = this.safePop(inst, 'greater-than-or-equal check (GTE)');
+              const a = this.safePop(inst, 'greater-than-or-equal check (GTE)');
+              this.stack.push(a >= b);
+              break;
+          }
+          case OpCode.AND: {
+              const b = this.safePop(inst, 'logical AND (AND)');
+              const a = this.safePop(inst, 'logical AND (AND)');
+              this.stack.push(a && b);
+              break;
+          }
+          case OpCode.OR: {
+              const b = this.safePop(inst, 'logical OR (OR)');
+              const a = this.safePop(inst, 'logical OR (OR)');
+              this.stack.push(a || b);
               break;
           }
 
@@ -223,8 +265,16 @@ export class VM {
             continue;
 
           case OpCode.JMP_FALSE:
-            const condition = this.safePop(inst, 'conditional jump (JMP_FALSE)');
-            if (!condition) {
+            const conditionFalse = this.safePop(inst, 'conditional jump (JMP_FALSE)');
+            if (!conditionFalse) {
+              this.ip = inst.operand;
+              continue;
+            }
+            break;
+
+          case OpCode.JMP_TRUE:
+            const conditionTrue = this.safePop(inst, 'conditional jump (JMP_TRUE)');
+            if (conditionTrue) {
               this.ip = inst.operand;
               continue;
             }

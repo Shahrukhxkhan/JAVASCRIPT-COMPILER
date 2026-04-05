@@ -7,27 +7,69 @@ import { generateBytecode } from './compiler/codegen';
 import { VM } from './compiler/vm';
 
 const code = `
-// Basic Arithmetic
-let a = 10;
-let b = 20;
-let sum = a + b;
-print("The sum of a and b is: " + sum);
-
-// Function Definition and Call
-function greet(name) {
-  print("Hello, " + name + "!");
+// 1. if, else if, else
+let x = 15;
+if (x < 10) {
+  print("x is less than 10");
+} else if (x == 15) {
+  print("x is exactly 15");
+} else {
+  print("x is something else");
 }
-greet("World");
 
-// Testing Division
-function divide(x, y) {
-  return x / y;
+// 2. while loop
+let count = 0;
+while (count < 3) {
+  print("while loop count: " + count);
+  count = count + 1;
 }
-print("10 / 2 = " + divide(10, 2));
 
-// Triggering a Runtime Error (Division by Zero)
-print("Triggering a division by zero error...");
-print(divide(10, 0));
+// 3. do...while loop
+let dCount = 0;
+do {
+  print("do-while loop count: " + dCount);
+  dCount = dCount + 1;
+} while (dCount < 2);
+
+// 4. for loop with break and continue
+for (let i = 0; i < 5; i = i + 1) {
+  if (i == 1) {
+    continue;
+  }
+  if (i == 3) {
+    break;
+  }
+  print("for loop i: " + i);
+}
+
+// 5. switch statement
+let fruit = "apple";
+switch (fruit) {
+  case "banana":
+    print("It's a banana");
+    break;
+  case "apple":
+    print("It's an apple");
+    break;
+  default:
+    print("Unknown fruit");
+}
+
+// 6. Ternary operator
+let age = 20;
+let status = age >= 18 ? "Adult" : "Minor";
+print("Status: " + status);
+
+// 7. try, catch, finally, throw
+try {
+  print("Inside try block");
+  throw "Custom Error!";
+  print("This should not print");
+} catch (e) {
+  print("Caught error: " + e);
+} finally {
+  print("Inside finally block");
+}
 `;
 
 try {

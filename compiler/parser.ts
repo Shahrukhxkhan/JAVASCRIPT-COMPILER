@@ -146,7 +146,11 @@ export class Parser {
   private statement(): ASTNode {
     if (this.matchKeyword('if')) return this.ifStatement();
     if (this.matchKeyword('while')) return this.whileStatement();
+    if (this.matchKeyword('do')) return this.doWhileStatement();
     if (this.matchKeyword('for')) return this.forStatement();
+    if (this.matchKeyword('break')) return this.breakStatement();
+    if (this.matchKeyword('continue')) return this.continueStatement();
+    if (this.matchKeyword('switch')) return this.switchStatement();
     if (this.matchKeyword('try')) return this.tryStatement();
     if (this.matchKeyword('return')) return this.returnStatement();
     if (this.matchKeyword('print')) return this.printStatement();
@@ -161,6 +165,54 @@ export class Parser {
     this.consume(TokenType.Punctuation, ')', "Expected ')' after while condition.");
     const body = this.statement();
     return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.WhileStatement, test: condition, body };
+  }
+
+  private doWhileStatement(): ASTNode {
+    const body = this.statement();
+    this.consume(TokenType.Keyword, 'while', "Expected 'while' after do block.");
+    this.consume(TokenType.Punctuation, '(', "Expected '(' after 'while'.");
+    const condition = this.expression();
+    this.consume(TokenType.Punctuation, ')', "Expected ')' after while condition.");
+    this.consume(TokenType.Punctuation, ';', "Expected ';' after do-while condition.");
+    return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.DoWhileStatement, test: condition, body };
+  }
+
+  private breakStatement(): ASTNode {
+    this.consume(TokenType.Punctuation, ';', "Expected ';' after break.");
+    return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BreakStatement };
+  }
+
+  private continueStatement(): ASTNode {
+    this.consume(TokenType.Punctuation, ';', "Expected ';' after continue.");
+    return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ContinueStatement };
+  }
+
+  private switchStatement(): ASTNode {
+    this.consume(TokenType.Punctuation, '(', "Expected '(' after 'switch'.");
+    const discriminant = this.expression();
+    this.consume(TokenType.Punctuation, ')', "Expected ')' after switch value.");
+    this.consume(TokenType.Punctuation, '{', "Expected '{' before switch body.");
+    
+    const cases: ASTNode[] = [];
+    while (!this.check(TokenType.Punctuation, '}') && !this.isAtEnd()) {
+      let test = null;
+      if (this.matchKeyword('case')) {
+        test = this.expression();
+        this.consume(TokenType.Operator, ':', "Expected ':' after case value.");
+      } else if (this.matchKeyword('default')) {
+        this.consume(TokenType.Operator, ':', "Expected ':' after default.");
+      } else {
+        throw new Error(`[Line ${this.peek().line}:${this.peek().column}] Parse Error: Expected 'case' or 'default' inside switch.`);
+      }
+      
+      const consequent: ASTNode[] = [];
+      while (!this.check(TokenType.Punctuation, '}') && !this.check(TokenType.Keyword, 'case') && !this.check(TokenType.Keyword, 'default') && !this.isAtEnd()) {
+        consequent.push(this.statement());
+      }
+      cases.push({ line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.SwitchCase, test, consequent });
+    }
+    this.consume(TokenType.Punctuation, '}', "Expected '}' after switch body.");
+    return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.SwitchStatement, discriminant, cases };
   }
 
   private forStatement(): ASTNode {
@@ -197,7 +249,7 @@ export class Parser {
       this.consume(TokenType.Punctuation, ')', "Expected ')' after catch parameter.");
       this.consume(TokenType.Punctuation, '{', "Expected '{' before catch body.");
       const body = this.block();
-      handler = { param, body };
+      handler = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.CatchClause, param, body };
     }
     let finalizer = null;
     if (this.matchKeyword('finally')) {
@@ -278,7 +330,7 @@ export class Parser {
   }
 
   private assignment(): ASTNode {
-    const expr = this.equality();
+    const expr = this.ternary();
     if (this.match(TokenType.Operator, '=') || 
         this.match(TokenType.Operator, '+=') || 
         this.match(TokenType.Operator, '-=') ||
@@ -298,9 +350,40 @@ export class Parser {
     return expr;
   }
 
+  private ternary(): ASTNode {
+    let expr = this.logicalOr();
+    if (this.match(TokenType.Operator, '?')) {
+      const consequent = this.expression();
+      this.consume(TokenType.Operator, ':', "Expected ':' in ternary expression.");
+      const alternate = this.assignment(); // Right-associative
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ConditionalExpression, test: expr, consequent, alternate };
+    }
+    return expr;
+  }
+
+  private logicalOr(): ASTNode {
+    let expr = this.logicalAnd();
+    while (this.match(TokenType.Operator, '||')) {
+      const operator = this.previous().value;
+      const right = this.logicalAnd();
+      expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };
+    }
+    return expr;
+  }
+
+  private logicalAnd(): ASTNode {
+    let expr = this.equality();
+    while (this.match(TokenType.Operator, '&&')) {
+      const operator = this.previous().value;
+      const right = this.equality();
+      expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };
+    }
+    return expr;
+  }
+
   private equality(): ASTNode {
     let expr = this.comparison();
-    while (this.match(TokenType.Operator, '==') || this.match(TokenType.Operator, '!=')) {
+    while (this.match(TokenType.Operator, '==') || this.match(TokenType.Operator, '!=') || this.match(TokenType.Operator, '===') || this.match(TokenType.Operator, '!==')) {
       const operator = this.previous().value;
       const right = this.comparison();
       expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };
@@ -310,7 +393,7 @@ export class Parser {
 
   private comparison(): ASTNode {
     let expr = this.term();
-    while (this.match(TokenType.Operator, '>') || this.match(TokenType.Operator, '<')) {
+    while (this.match(TokenType.Operator, '>') || this.match(TokenType.Operator, '<') || this.match(TokenType.Operator, '>=') || this.match(TokenType.Operator, '<=')) {
        const operator = this.previous().value;
        const right = this.term();
        expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };

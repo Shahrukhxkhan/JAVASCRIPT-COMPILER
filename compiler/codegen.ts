@@ -82,6 +82,24 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         instructions.push({ line: q.line, column: q.column, op: OpCode.EQ }); 
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
         break;
+      case 'NEQ': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NEQ }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'EQ_STRICT': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.EQ_STRICT }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'NEQ_STRICT': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NEQ_STRICT }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
       case 'GT': 
         pushOperand(q.arg1, q); 
         pushOperand(q.arg2, q); 
@@ -92,6 +110,30 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         pushOperand(q.arg1, q); 
         pushOperand(q.arg2, q); 
         instructions.push({ line: q.line, column: q.column, op: OpCode.LT }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'GTE': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.GTE }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'LTE': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.LTE }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'AND': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.AND }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'OR': 
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.OR }); 
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
         break;
       
@@ -178,6 +220,12 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
       case 'IF_FALSE_GOTO':
         pushOperand(q.arg1, q);
         instructions.push({ line: q.line, column: q.column, op: OpCode.JMP_FALSE, operand: -1 }); // Placeholder
+        if(q.result) jumpsToFix.push({ index: instructions.length - 1, label: q.result });
+        break;
+
+      case 'IF_TRUE_GOTO':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.JMP_TRUE, operand: -1 }); // Placeholder
         if(q.result) jumpsToFix.push({ index: instructions.length - 1, label: q.result });
         break;
 
