@@ -2,155 +2,124 @@ import { ASTNode, Program, SemanticError } from '../types';
 import { ASTNodeType } from '../constants';
 
 class SymbolTable {
-  private scopes: Set<string>[] = [];
+  private scopes: Map<string, { kind: string }>[] = [];
 
   constructor() {
     this.enterScope(); // Global scope
   }
 
-  enterScope() { this.scopes.push(new Set()); }
-  exitScope() { this.scopes.pop(); }
+  enterScope() {
+    this.scopes.push(new Map());
+  }
 
-  define(name: string): boolean {
+  exitScope() {
+    this.scopes.pop();
+  }
+
+  define(name: string, kind: string = 'let'): boolean {
     const scope = this.scopes[this.scopes.length - 1];
-    if (scope.has(name)) return false;
-    scope.add(name);
+    if (scope.has(name)) return false; // Duplicate definition in same scope
+    scope.set(name, { kind });
     return true;
   }
 
-  resolve(name: string): boolean {
+  resolve(name: string): { kind: string } | null {
     for (let i = this.scopes.length - 1; i >= 0; i--) {
-      if (this.scopes[i].has(name)) return true;
+      if (this.scopes[i].has(name)) return this.scopes[i].get(name)!;
     }
-    return false;
+    return null;
   }
 }
 
 export function analyze(ast: Program): SemanticError[] {
   const errors: SemanticError[] = [];
   const symbolTable = new SymbolTable();
-
+  
   // Pre-define built-ins
-  symbolTable.define('print');
-  symbolTable.define('console');
+  symbolTable.define('print', 'const');
+  symbolTable.define('console', 'const');
+  symbolTable.define('Symbol', 'const');
 
+  // Revised Traversal for specific nodes to prevent false positives on declaration names
   function walk(node: ASTNode) {
-    if (!node) return;
+     if(!node) return;
+     if(node.type === ASTNodeType.VariableDeclaration) {
+         const kind = node.kind || 'let';
+         if (node.target) {
+           defineBindingPattern(node.target, kind);
+         } else if (node.name) {
+           if(!symbolTable.define(node.name, kind)) {
+               errors.push({ message: `Variable '${node.name}' declared twice.`, line: node.line, column: node.column });
+           }
+         }
+         if(node.init) walk(node.init);
+     } else if (node.type === ASTNodeType.AssignmentExpression) {
+         if (node.left.type === ASTNodeType.Identifier) {
+             const symbol = symbolTable.resolve(node.left.value);
+             if (symbol && symbol.kind === 'const') {
+                 errors.push({ message: `Assignment to constant variable '${node.left.value}'.`, line: node.left.line, column: node.left.column });
+             }
+         }
+         walk(node.left);
+         walk(node.right);
+     } else if (node.type === ASTNodeType.FunctionDeclaration || node.type === ASTNodeType.ArrowFunctionExpression) {
+         if (node.type === ASTNodeType.FunctionDeclaration && node.name) {
+           if(!symbolTable.define(node.name, 'const')) {
+               errors.push({ message: `Function '${node.name}' declared twice.`, line: node.line, column: node.column });
+           }
+         }
+         symbolTable.enterScope();
+         node.params.forEach((p: string) => symbolTable.define(p, 'let'));
+         walk(node.body);
+         symbolTable.exitScope();
+     } else if (node.type === ASTNodeType.ClassDeclaration) {
+         if(!symbolTable.define(node.name, 'const')) {
+             errors.push({ message: `Class '${node.name}' declared twice.`, line: node.line, column: node.column });
+         }
+         symbolTable.enterScope();
+         node.body.forEach(walk);
+         symbolTable.exitScope();
+     } else if (node.type === ASTNodeType.BlockStatement) {
+         symbolTable.enterScope();
+         node.body.forEach(walk);
+         symbolTable.exitScope();
+     } else if (node.type === ASTNodeType.Identifier) {
+         if(!symbolTable.resolve(node.value)) {
+             errors.push({ message: `Undeclared identifier '${node.value}'.`, line: node.line, column: node.column });
+         }
+     } else if (node.type === ASTNodeType.MemberExpression) {
+         walk(node.object);
+         if (node.computed) walk(node.property);
+     } else {
+         const keys = Object.keys(node);
+         for(const key of keys) {
+             const child = node[key];
+             if(Array.isArray(child)) {
+                 child.forEach(c => { if(c && typeof c.type === 'string') walk(c) });
+             } else if (child && typeof child.type === 'string') {
+                 walk(child);
+             }
+         }
+     }
+  }
 
-    switch (node.type) {
-      case ASTNodeType.Program:
-        node.body.forEach(walk);
-        break;
-
-      case ASTNodeType.VariableDeclaration:
-        if (!symbolTable.define(node.name)) {
-          errors.push({ message: `Variable '${node.name}' declared twice.`, line: node.line });
+  function defineBindingPattern(pattern: ASTNode, kind: string) {
+    if (pattern.type === ASTNodeType.ArrayPattern) {
+      pattern.elements.forEach((el: any) => {
+        if (typeof el === 'string') {
+          symbolTable.define(el, kind);
+        } else if (el) {
+          defineBindingPattern(el, kind);
         }
-        if (node.init) walk(node.init);
-        break;
-
-      case ASTNodeType.FunctionDeclaration:
-        if (!symbolTable.define(node.name)) {
-          errors.push({ message: `Function '${node.name}' declared twice.`, line: node.line });
-        }
-        symbolTable.enterScope();
-        node.params.forEach((p: string) => symbolTable.define(p));
-        walk(node.body);
-        symbolTable.exitScope();
-        break;
-
-      case ASTNodeType.BlockStatement:
-        symbolTable.enterScope();
-        node.body.forEach(walk);
-        symbolTable.exitScope();
-        break;
-
-      case ASTNodeType.WhileStatement:
-        walk(node.test);
-        walk(node.body);
-        break;
-
-      case ASTNodeType.ForStatement:
-        symbolTable.enterScope();
-        if (node.init) walk(node.init);
-        if (node.test) walk(node.test);
-        if (node.update) walk(node.update);
-        walk(node.body);
-        symbolTable.exitScope();
-        break;
-
-      case ASTNodeType.BreakStatement:
-      case ASTNodeType.ContinueStatement:
-        break; // Validated in parser
-
-      case ASTNodeType.IfStatement:
-        walk(node.test);
-        walk(node.consequent);
-        if (node.alternate) walk(node.alternate);
-        break;
-
-      case ASTNodeType.ReturnStatement:
-        if (node.argument) walk(node.argument);
-        break;
-
-      case ASTNodeType.ExpressionStatement:
-        walk(node.expression);
-        break;
-
-      case ASTNodeType.AssignmentExpression:
-        // For index/member assign, walk only the object part
-        if (node.left.type === ASTNodeType.IndexExpression || node.left.type === ASTNodeType.MemberExpression) {
-          walk(node.left.object);
-          if (node.left.index) walk(node.left.index);
+      });
+    } else if (pattern.type === ASTNodeType.ObjectPattern) {
+      pattern.properties.forEach((prop: any) => {
+        if (typeof prop.value === 'string') {
+          symbolTable.define(prop.value, kind);
         } else {
-          walk(node.left);
+          defineBindingPattern(prop.value, kind);
         }
-        walk(node.right);
-        break;
-
-      case ASTNodeType.BinaryExpression:
-        walk(node.left);
-        walk(node.right);
-        break;
-
-      case ASTNodeType.UpdateExpression:
-        walk(node.argument);
-        break;
-
-      case ASTNodeType.CallExpression:
-        walk(node.callee);
-        node.arguments.forEach(walk);
-        break;
-
-      case ASTNodeType.MemberExpression:
-        walk(node.object);
-        // property name is not a variable lookup
-        break;
-
-      case ASTNodeType.IndexExpression:
-        walk(node.object);
-        walk(node.index);
-        break;
-
-      case ASTNodeType.ArrayExpression:
-        node.elements.forEach(walk);
-        break;
-
-      case ASTNodeType.ObjectExpression:
-        node.properties.forEach((p: { key: string; value: ASTNode }) => walk(p.value));
-        break;
-
-      case ASTNodeType.Identifier:
-        if (!symbolTable.resolve(node.value)) {
-          errors.push({ message: `Undeclared identifier '${node.value}'.`, line: node.line });
-        }
-        break;
-
-      case ASTNodeType.Literal:
-        break; // Nothing to check
-
-      default:
-        break;
+      });
     }
   }
 

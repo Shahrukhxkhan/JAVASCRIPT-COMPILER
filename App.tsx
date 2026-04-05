@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Editor from './components/Editor';
 import OutputPanel from './components/OutputPanel';
+import GitHubSync from './components/GitHubSync';
 import { tokenize } from './compiler/lexer';
 import { Parser } from './compiler/parser';
 import { analyze } from './compiler/semantic';
@@ -11,67 +12,51 @@ import { VM } from './compiler/vm';
 import { CompilerResult } from './types';
 
 const INITIAL_CODE = `
-// ── 1. While Loop ──────────────────────────
-let i = 1;
-let sum = 0;
-while (i <= 5) {
-  sum = sum + i;
-  i = i + 1;
+// Basic Arithmetic
+let a = 10;
+let b = 20;
+let sum = a + b;
+print("The sum of a and b is: " + sum);
+
+// Function call
+function greet(name) {
+  print("Hello, " + name + "!");
 }
-print(sum); // 15
+greet("World");
 
-// ── 2. For Loop ────────────────────────────
-let factorial = 1;
-for (let k = 1; k <= 5; k = k + 1) {
-  factorial = factorial * k;
+// Let's test the new runtime error tracking!
+function divide(x, y) {
+  return x / y;
 }
-print(factorial); // 120
 
-// ── 3. Nested Functions / Closures ─────────
-function makeAdder(x) {
-  function add(y) {
-    return x + y;
-  }
-  return add(10);
-}
-print(makeAdder(5)); // 15
-
-// ── 4. Arrays ──────────────────────────────
-let nums = [10, 20, 30, 40, 50];
-nums[2] = 99;
-print(nums[2]); // 99
-
-let total = 0;
-for (let j = 0; j < 5; j = j + 1) {
-  total = total + nums[j];
-}
-print(total); // 219
-
-// ── 5. Objects ─────────────────────────────
-let person = { name: "Alice", age: 30, score: 95 };
-print(person.name);  // Alice
-print(person.score); // 95
+print("10 / 2 = " + divide(10, 2));
+print("Triggering a division by zero error...");
+print(divide(10, 0)); // This will throw an error with line and column numbers!
 `.trim();
 
 const App: React.FC = () => {
   const [code, setCode] = useState(INITIAL_CODE);
-  const [activeTab, setActiveTab] = useState<'tokens' | 'ast' | 'ir' | 'opt' | 'bytecode' | 'console' | 'errors'>('console');
+  const [activeTab, setActiveTab] = useState<'tokens'|'ast'|'ir'|'opt'|'bytecode'|'console'>('console');
   const [result, setResult] = useState<CompilerResult | null>(null);
-  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCompile = () => {
-    setFatalError(null);
+    setError(null);
     try {
       // 1. Lexer
       const tokens = tokenize(code);
-
-      // 2. Parser (with error recovery)
+      
+      // 2. Parser
       const parser = new Parser(tokens);
       const ast = parser.parse();
-      const parseErrors = parser.parseErrors;
 
       // 3. Semantic Analysis
       const semanticErrors = analyze(ast);
+      if (semanticErrors.length > 0) {
+        const err = semanticErrors[0];
+        const loc = err.line ? `[Line ${err.line}:${err.column}] ` : '';
+        throw new Error(`${loc}Semantic Error: ${err.message}`);
+      }
 
       // 4. IR Generation
       const ir = generateIR(ast);
@@ -80,149 +65,105 @@ const App: React.FC = () => {
       const optimizedIR = optimize(ir);
 
       // 6. Code Gen
-      const bytecode = generateBytecode(optimizedIR);
+      const { instructions: bytecode, labels } = generateBytecode(optimizedIR);
 
       // 7. Execution (VM)
-      const vm = new VM(bytecode);
+      const vm = new VM(bytecode, labels);
       const logs = vm.run();
 
-      const compiled: CompilerResult = {
+      setResult({
         tokens,
         ast,
-        parseErrors,
         semanticErrors,
         ir,
         optimizedIR,
         bytecode,
         logs
-      };
-
-      setResult(compiled);
-
-      // Auto-switch to errors tab if there are parse/semantic errors
-      const hasErrors = parseErrors.length > 0 || semanticErrors.length > 0;
-      setActiveTab(hasErrors ? 'errors' : 'console');
+      });
+      setActiveTab('console');
 
     } catch (err: any) {
-      setFatalError(err.message);
+      setError(err.message);
       setResult(null);
     }
   };
-
-  const TABS = [
-    { id: 'console', label: '▶ Console' },
-    {
-      id: 'errors', label: '⚠ Errors',
-      badge: (result?.parseErrors.length ?? 0) + (result?.semanticErrors.length ?? 0) || undefined
-    },
-    { id: 'tokens', label: 'Tokens' },
-    { id: 'ast', label: 'AST' },
-    { id: 'ir', label: 'IR' },
-    { id: 'opt', label: 'Optimized' },
-    { id: 'bytecode', label: 'Bytecode' },
-  ] as const;
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white overflow-hidden">
       {/* Header */}
       <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-6 justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full bg-blue-500 shadow-lg shadow-blue-500/50"></div>
-          <h1 className="font-bold text-lg tracking-tight">
-            JS Compiler
-          </h1>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+          <h1 className="font-bold text-lg tracking-tight">JS Compiler <span className="text-gray-500 font-normal">from scratch</span></h1>
         </div>
-        <button
-          onClick={handleCompile}
-          className="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-md font-semibold transition-colors flex items-center gap-2 shadow-lg"
-        >
-          <span>▶</span> Compile &amp; Run
-        </button>
+        <div className="flex items-center gap-4">
+          <GitHubSync currentCode={code} />
+          <button 
+            onClick={handleCompile}
+            className="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-md font-semibold transition-colors flex items-center gap-2"
+          >
+            <span>▶</span> Compile & Run
+          </button>
+        </div>
       </header>
 
-      {/* Main */}
+      {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-
-        {/* Editor panel */}
+        
+        {/* Left: Editor */}
         <div className="w-1/2 p-4 flex flex-col gap-2">
-          <div className="text-gray-400 text-xs font-semibold uppercase tracking-widest">Source Code</div>
+          <div className="text-gray-400 text-sm font-semibold uppercase">Source Code</div>
           <Editor value={code} onChange={setCode} />
         </div>
 
-        {/* Output panel */}
+        {/* Right: Output Tabs */}
         <div className="w-1/2 p-4 flex flex-col gap-2 bg-gray-900 border-l border-gray-800">
-
+          
           {/* Tabs */}
-          <div className="flex gap-1 border-b border-gray-700 pb-2 overflow-x-auto flex-wrap">
-            {TABS.map(tab => (
+          <div className="flex gap-1 border-b border-gray-700 pb-2 overflow-x-auto">
+            {[
+              { id: 'console', label: 'Console' },
+              { id: 'tokens', label: 'Tokens' },
+              { id: 'ast', label: 'AST' },
+              { id: 'ir', label: 'IR' },
+              { id: 'opt', label: 'Optimized' },
+              { id: 'bytecode', label: 'Bytecode' },
+            ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${activeTab === tab.id
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                  }`}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === tab.id 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
               >
                 {tab.label}
-                {'badge' in tab && tab.badge ? (
-                  <span className="bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                    {tab.badge}
-                  </span>
-                ) : null}
               </button>
             ))}
           </div>
 
-          {/* Panel body */}
+          {/* Panel Content */}
           <div className="flex-1 overflow-hidden relative">
-
-            {/* Fatal compile error */}
-            {fatalError && (
+            {error && (
               <div className="absolute inset-0 bg-red-900/20 backdrop-blur-sm flex items-center justify-center p-8 z-10">
-                <div className="bg-red-900 border border-red-500 text-white p-6 rounded-lg shadow-xl max-w-lg w-full">
-                  <h3 className="text-lg font-bold mb-2">❌ Fatal Error</h3>
-                  <p className="font-mono text-sm whitespace-pre-wrap">{fatalError}</p>
+                <div className="bg-red-900 border border-red-500 text-white p-6 rounded-lg shadow-xl max-w-lg">
+                  <h3 className="text-xl font-bold mb-2">Compilation Failed</h3>
+                  <p className="font-mono whitespace-pre-wrap">{error}</p>
                 </div>
               </div>
             )}
 
-            {!result && !fatalError && (
-              <div className="h-full flex items-center justify-center text-gray-600 text-sm">
-                Press "Compile &amp; Run" to see output
+            {!result && !error && (
+              <div className="h-full flex items-center justify-center text-gray-600">
+                Press "Compile & Run" to see output
               </div>
             )}
 
             {result && (
               <>
                 {activeTab === 'console' && (
-                  <OutputPanel
-                    title="Console Output"
-                    data={result.logs.length > 0 ? result.logs.join('\n') : '(no output)'}
-                    type="text"
-                  />
-                )}
-                {activeTab === 'errors' && (
-                  <div className="h-full overflow-auto p-2 space-y-2 font-mono text-sm">
-                    {result.parseErrors.length === 0 && result.semanticErrors.length === 0 ? (
-                      <div className="text-green-400 p-3">✅ No errors found</div>
-                    ) : (
-                      <>
-                        {result.parseErrors.map((e, i) => (
-                          <div key={i} className="bg-orange-900/30 border border-orange-600 rounded p-3">
-                            <span className="text-orange-400 font-bold">Parse Error (line {e.line}:{e.col}) </span>
-                            <span className="text-gray-300">{e.message}</span>
-                            {e.recovered && <span className="ml-2 text-gray-500 text-xs italic">[recovered]</span>}
-                          </div>
-                        ))}
-                        {result.semanticErrors.map((e, i) => (
-                          <div key={i} className="bg-red-900/30 border border-red-600 rounded p-3">
-                            <span className="text-red-400 font-bold">Semantic Error{e.line ? ` (line ${e.line})` : ''}: </span>
-                            <span className="text-gray-300">{e.message}</span>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
+                  <OutputPanel title="Output Log" data={result.logs.join('\n')} type="text" />
                 )}
                 {activeTab === 'tokens' && (
                   <OutputPanel title="Lexer Tokens" data={result.tokens} type="json" />
@@ -237,7 +178,7 @@ const App: React.FC = () => {
                   <OutputPanel title="Optimized IR" data={result.optimizedIR} type="list" />
                 )}
                 {activeTab === 'bytecode' && (
-                  <OutputPanel title="VM Bytecode (with source lines)" data={result.bytecode} type="list" />
+                  <OutputPanel title="VM Bytecode" data={result.bytecode} type="list" />
                 )}
               </>
             )}

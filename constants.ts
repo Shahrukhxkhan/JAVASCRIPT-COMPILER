@@ -3,6 +3,10 @@ export enum TokenType {
   Identifier = 'Identifier',
   Number = 'Number',
   String = 'String',
+  TemplateHead = 'TemplateHead',
+  TemplateMiddle = 'TemplateMiddle',
+  TemplateTail = 'TemplateTail',
+  TemplateNoSubstitution = 'TemplateNoSubstitution',
   Operator = 'Operator',
   Punctuation = 'Punctuation',
   EOF = 'EOF'
@@ -16,8 +20,6 @@ export enum ASTNodeType {
   IfStatement = 'IfStatement',
   WhileStatement = 'WhileStatement',
   ForStatement = 'ForStatement',
-  BreakStatement = 'BreakStatement',
-  ContinueStatement = 'ContinueStatement',
   ReturnStatement = 'ReturnStatement',
   ExpressionStatement = 'ExpressionStatement',
   BinaryExpression = 'BinaryExpression',
@@ -26,40 +28,43 @@ export enum ASTNodeType {
   CallExpression = 'CallExpression',
   AssignmentExpression = 'AssignmentExpression',
   MemberExpression = 'MemberExpression',
-  IndexExpression = 'IndexExpression',
   ArrayExpression = 'ArrayExpression',
   ObjectExpression = 'ObjectExpression',
-  UpdateExpression = 'UpdateExpression',
+  ArrowFunctionExpression = 'ArrowFunctionExpression',
+  TemplateLiteral = 'TemplateLiteral',
+  TaggedTemplateExpression = 'TaggedTemplateExpression',
+  ClassDeclaration = 'ClassDeclaration',
+  TryStatement = 'TryStatement',
+  ThrowStatement = 'ThrowStatement',
+  AwaitExpression = 'AwaitExpression',
+  ArrayPattern = 'ArrayPattern',
+  ObjectPattern = 'ObjectPattern'
 }
 
 export enum OpCode {
   HALT = 'HALT',
-  CONST = 'CONST',       // Push constant to stack
-  ADD = 'ADD',           // Pop 2, Add, Push result
+  CONST = 'CONST',   // Push constant to stack
+  ADD = 'ADD',       // Pop 2, Add, Push result
   SUB = 'SUB',
   MUL = 'MUL',
   DIV = 'DIV',
-  NEQ = 'NEQ',           // Not equal
-  LTE = 'LTE',           // Less than or equal
-  GTE = 'GTE',           // Greater than or equal
-  LOAD = 'LOAD',         // Load variable from current scope chain
-  STORE = 'STORE',       // Store variable in current scope
-  DEFINE = 'DEFINE',     // Define variable in current scope only
-  STORE_OUTER = 'STORE_OUTER', // Assign into already-defined outer scope var
-  JMP = 'JMP',           // Jump unconditionally
+  LOAD = 'LOAD',     // Load variable from env
+  STORE = 'STORE',   // Store variable to env
+  JMP = 'JMP',       // Jump unconditionally
   JMP_FALSE = 'JMP_FALSE', // Jump if top of stack is falsey
-  PRINT = 'PRINT',       // Pop and print
+  PRINT = 'PRINT',    // Pop and print (for demo purposes)
   CALL = 'CALL',
   RET = 'RET',
-  EQ = 'EQ',             // Equality check
+  EQ = 'EQ',         // Equality check
   LT = 'LT',
   GT = 'GT',
-  ENTER_SCOPE = 'ENTER_SCOPE', // Push new environment frame
-  EXIT_SCOPE = 'EXIT_SCOPE',   // Pop environment frame
-  ARRAY_NEW = 'ARRAY_NEW',     // Create array with n elements from stack
-  ARRAY_GET = 'ARRAY_GET',     // arr[index]
-  ARRAY_SET = 'ARRAY_SET',     // arr[index] = value
-  OBJ_NEW = 'OBJ_NEW',         // Create object with n key/value pairs from stack
-  OBJ_GET = 'OBJ_GET',         // obj.key
-  OBJ_SET = 'OBJ_SET',         // obj.key = value
+  ARRAY = 'ARRAY',   // Create array from N elements on stack
+  OBJECT = 'OBJECT', // Create object from N key-value pairs on stack
+  GET_PROP = 'GET_PROP', // Get property from object
+  SET_PROP = 'SET_PROP', // Set property on object
+  TRY_START = 'TRY_START', // Push exception handler to stack
+  TRY_END = 'TRY_END',     // Pop exception handler
+  THROW = 'THROW',         // Throw exception
+  AWAIT = 'AWAIT',         // Yield execution (simulated)
+  EXTENDS = 'EXTENDS'      // Basic inheritance
 }

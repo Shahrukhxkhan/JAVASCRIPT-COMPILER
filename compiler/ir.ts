@@ -1,136 +1,242 @@
 import { ASTNode, Quadruple, Program } from '../types';
 import { ASTNodeType } from '../constants';
 
+// A simple counter for temporary variables
 let tempCounter = 0;
 let labelCounter = 0;
 
-function newTemp(): string { return `t${tempCounter++}`; }
-function newLabel(): string { return `L${labelCounter++}`; }
+function newTemp(): string {
+  return `t${tempCounter++}`;
+}
+
+function newLabel(): string {
+  return `L${labelCounter++}`;
+}
 
 export function generateIR(ast: Program): Quadruple[] {
   tempCounter = 0;
   labelCounter = 0;
   const ir: Quadruple[] = [];
 
-  // Stack of { breakLabel, continueLabel } for nested loops
-  const loopStack: { breakLabel: string; continueLabel: string }[] = [];
-
-  function emit(op: string, arg1: string | null, arg2: string | null, result: string | null, sourceLine?: number) {
-    ir.push({ op, arg1, arg2, result, sourceLine });
-  }
-
   function gen(node: ASTNode): string | null {
-    const line = node.line;
-
     switch (node.type) {
-
       case ASTNodeType.Program:
       case ASTNodeType.BlockStatement:
         node.body.forEach((stmt: ASTNode) => gen(stmt));
         return null;
 
       case ASTNodeType.Literal:
+        if (node.value === undefined) return 'undefined';
+        if (typeof node.value === 'bigint') return `${node.value}n`;
+        // Use JSON.stringify to keep quotes for strings and format numbers correctly
         return JSON.stringify(node.value);
 
       case ASTNodeType.Identifier:
         return node.value;
 
       case ASTNodeType.VariableDeclaration:
-        if (node.init) {
+        if (node.target) {
+          // Destructuring
           const val = gen(node.init);
-          emit('DEFINE_VAR', val, null, node.name, line);
-        } else {
-          emit('DEFINE_VAR', 'null', null, node.name, line);
+          genDestructuring(node.target, val);
+        } else if (node.name && node.init) {
+          const val = gen(node.init);
+          ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: val, arg2: null, result: node.name });
         }
         return null;
 
       case ASTNodeType.AssignmentExpression: {
         const right = gen(node.right);
-        const left = node.left;
+        let finalVal = right;
+        if (node.operator && node.operator !== '=') {
+          const leftVal = gen(node.left);
+          const temp = newTemp();
+          const op = node.operator.slice(0, -1);
+          let opCode = '';
+          switch(op) {
+            case '+': opCode = 'ADD'; break;
+            case '-': opCode = 'SUB'; break;
+            case '*': opCode = 'MUL'; break;
+            case '/': opCode = 'DIV'; break;
+          }
+          ir.push({ line: node.line, column: node.column, op: opCode, arg1: leftVal, arg2: right, result: temp });
+          finalVal = temp;
+        }
 
-        if (left.type === ASTNodeType.IndexExpression) {
-          // arr[i] = val  →  ARRAY_SET
-          const obj = gen(left.object);
-          const idx = gen(left.index);
-          emit('ARRAY_SET', obj, idx, right, line);
-          return right;
+        if (node.left.type === ASTNodeType.Identifier) {
+          ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: finalVal, arg2: null, result: node.left.value });
+        } else if (node.left.type === ASTNodeType.MemberExpression) {
+          const obj = gen(node.left.object);
+          const prop = node.left.property.value;
+          ir.push({ line: node.line, column: node.column, op: 'SET_PROP', arg1: obj, arg2: prop, result: finalVal });
         }
-        if (left.type === ASTNodeType.MemberExpression) {
-          // obj.key = val  →  OBJ_SET
-          const obj = gen(left.object);
-          const key = JSON.stringify(left.property.value);
-          emit('OBJ_SET', obj, key, right, line);
-          return right;
-        }
-        // Simple variable assignment
-        emit('ASSIGN', right, null, left.value, line);
-        return left.value;
+        return finalVal;
       }
 
-      case ASTNodeType.BinaryExpression: {
-        // Handle short-circuit && / ||
-        if (node.operator === '&&') {
-          const temp = newTemp();
-          const falseLabel = newLabel();
-          const endLabel = newLabel();
-          const l = gen(node.left);
-          emit('IF_FALSE_GOTO', l, null, falseLabel, line);
-          const r = gen(node.right);
-          emit('ASSIGN', r, null, temp, line);
-          emit('GOTO', null, null, endLabel, line);
-          emit('LABEL', null, null, falseLabel, line);
-          emit('ASSIGN', '0', null, temp, line);
-          emit('LABEL', null, null, endLabel, line);
-          return temp;
-        }
-        if (node.operator === '||') {
-          const temp = newTemp();
-          const trueLabel = newLabel();
-          const endLabel = newLabel();
-          const l = gen(node.left);
-          emit('IF_TRUE_GOTO', l, null, trueLabel, line);
-          const r = gen(node.right);
-          emit('ASSIGN', r, null, temp, line);
-          emit('GOTO', null, null, endLabel, line);
-          emit('LABEL', null, null, trueLabel, line);
-          emit('ASSIGN', '1', null, temp, line);
-          emit('LABEL', null, null, endLabel, line);
-          return temp;
-        }
-
-        const t1 = gen(node.left);
-        const t2 = gen(node.right);
+      case ASTNodeType.MemberExpression: {
+        const obj = gen(node.object);
+        const prop = node.computed ? gen(node.property) : node.property.value;
         const temp = newTemp();
-        const opMap: Record<string, string> = {
-          '+': 'ADD', '-': 'SUB', '*': 'MUL', '/': 'DIV', '%': 'MOD',
-          '==': 'EQ', '===': 'EQ', '!=': 'NEQ', '!==': 'NEQ',
-          '>': 'GT', '<': 'LT', '>=': 'GTE', '<=': 'LTE',
-          'UNARY_MINUS': 'UNARY_MINUS', 'NOT': 'NOT',
-        };
-        const opCode = opMap[node.operator] || 'UNKNOWN';
-
-        if (opCode === 'UNARY_MINUS') {
-          emit('UNARY_MINUS', t2, null, temp, line);
-        } else if (opCode === 'NOT') {
-          emit('NOT', t2, null, temp, line);
-        } else {
-          emit(opCode, t1, t2, temp, line);
-        }
+        ir.push({ line: node.line, column: node.column, op: 'GET_PROP', arg1: obj, arg2: prop, result: temp });
         return temp;
       }
 
-      case ASTNodeType.UpdateExpression: {
-        // i++ / ++i  →  ASSIGN i, i+1; return old or new value
-        const argName = gen(node.argument)!;
-        const one = '1';
+      case ASTNodeType.ArrayExpression: {
+        const elements = node.elements.map((e: ASTNode) => gen(e));
         const temp = newTemp();
-        emit('ADD', argName, one, temp, line);
-        if (node.operator === '--') emit('SUB', argName, one, temp, line);
-        // prefix returns new value, postfix returns old value
-        const retVal = newTemp();
-        emit('ASSIGN', node.prefix ? temp : argName, null, retVal, line);
-        emit('ASSIGN', temp, null, argName, line);
-        return retVal;
+        ir.push({ line: node.line, column: node.column, op: 'ARRAY', arg1: elements.length.toString(), arg2: elements.join(','), result: temp });
+        return temp;
+      }
+
+      case ASTNodeType.ObjectExpression: {
+        const props = node.properties.map((p: any) => `${p.key}:${gen(p.value)}`);
+        const temp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: props.length.toString(), arg2: props.join(','), result: temp });
+        return temp;
+      }
+
+      case ASTNodeType.WhileStatement: {
+        const startLabel = newLabel();
+        const endLabel = newLabel();
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
+        const condition = gen(node.test);
+        ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: endLabel });
+        gen(node.body);
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        return null;
+      }
+
+      case ASTNodeType.ForStatement: {
+        if (node.init) gen(node.init);
+        const startLabel = newLabel();
+        const endLabel = newLabel();
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
+        if (node.test) {
+          const condition = gen(node.test);
+          ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: endLabel });
+        }
+        gen(node.body);
+        if (node.update) gen(node.update);
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        return null;
+      }
+
+      case ASTNodeType.TryStatement: {
+        const catchLabel = newLabel();
+        const endLabel = newLabel();
+        ir.push({ line: node.line, column: node.column, op: 'TRY_START', arg1: null, arg2: null, result: catchLabel });
+        gen(node.block);
+        ir.push({ line: node.line, column: node.column, op: 'TRY_END', arg1: null, arg2: null, result: null });
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: endLabel });
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: catchLabel });
+        if (node.handler) {
+          ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: node.handler.param });
+          gen(node.handler.body);
+        }
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        if (node.finalizer) gen(node.finalizer);
+        return null;
+      }
+
+      case ASTNodeType.AwaitExpression: {
+        const arg = gen(node.argument);
+        const temp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'AWAIT', arg1: arg, arg2: null, result: temp });
+        return temp;
+      }
+
+      case ASTNodeType.ArrowFunctionExpression: {
+        const funcName = newTemp(); // Anonymous function needs a name in IR
+        const funcEndLabel = newLabel();
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: funcEndLabel });
+        ir.push({ line: node.line, column: node.column, op: 'FUNC_START', arg1: null, arg2: null, result: funcName });
+        node.params.forEach((p: string) => {
+          ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p });
+        });
+        if (node.body.type === ASTNodeType.BlockStatement) {
+          gen(node.body);
+        } else {
+          const val = gen(node.body);
+          ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: val, arg2: null, result: null });
+        }
+        ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: '0', arg2: null, result: null });
+        ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: funcName });
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
+        return funcName;
+      }
+
+      case ASTNodeType.BinaryExpression: {
+        const t1 = gen(node.left);
+        const t2 = gen(node.right);
+        const temp = newTemp();
+        let opCode = '';
+        switch(node.operator) {
+            case '+': opCode = 'ADD'; break;
+            case '-': opCode = 'SUB'; break;
+            case '*': opCode = 'MUL'; break;
+            case '/': opCode = 'DIV'; break;
+            case '==': opCode = 'EQ'; break;
+            case '>': opCode = 'GT'; break;
+            case '<': opCode = 'LT'; break;
+            default: opCode = 'UNKNOWN';
+        }
+        ir.push({ line: node.line, column: node.column, op: opCode, arg1: t1, arg2: t2, result: temp });
+        return temp;
+      }
+
+      case ASTNodeType.TemplateLiteral: {
+        let resultTemp = newTemp();
+        // Start with the first quasi
+        ir.push({ line: node.line, column: node.column, op: 'CONST', arg1: `"${node.quasis[0].value.cooked}"`, arg2: null, result: resultTemp });
+        
+        for (let i = 0; i < node.expressions.length; i++) {
+            const exprTemp = gen(node.expressions[i]);
+            const nextResultTemp = newTemp();
+            ir.push({ line: node.line, column: node.column, op: 'ADD', arg1: resultTemp, arg2: exprTemp, result: nextResultTemp });
+            resultTemp = nextResultTemp;
+            
+            const quasiCooked = node.quasis[i + 1].value.cooked;
+            if (quasiCooked !== '') {
+                const quasiTemp = newTemp();
+                ir.push({ line: node.line, column: node.column, op: 'CONST', arg1: `"${quasiCooked}"`, arg2: null, result: quasiTemp });
+                const finalResultTemp = newTemp();
+                ir.push({ line: node.line, column: node.column, op: 'ADD', arg1: resultTemp, arg2: quasiTemp, result: finalResultTemp });
+                resultTemp = finalResultTemp;
+            }
+        }
+        return resultTemp;
+      }
+
+      case ASTNodeType.TaggedTemplateExpression: {
+        // Tagged templates: tag(quasis, ...expressions)
+        // For simplicity, we'll pass an array of strings as the first argument
+        const tagTemp = gen(node.tag);
+        
+        // Create an array for quasis
+        const quasisArrayTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'ARRAY', arg1: null, arg2: null, result: quasisArrayTemp });
+        
+        node.quasi.quasis.forEach((quasi: any, index: number) => {
+            const strTemp = newTemp();
+            ir.push({ line: node.line, column: node.column, op: 'CONST', arg1: `"${quasi.value.cooked}"`, arg2: null, result: strTemp });
+            ir.push({ line: node.line, column: node.column, op: 'STORE_PROP', arg1: quasisArrayTemp, arg2: index.toString(), result: strTemp });
+        });
+        
+        // Push quasis array as first param
+        ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: quasisArrayTemp, arg2: null, result: null });
+        
+        // Push expressions as subsequent params
+        const exprTemps = node.quasi.expressions.map((expr: ASTNode) => gen(expr));
+        exprTemps.forEach((temp: string) => {
+            ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: temp, arg2: null, result: null });
+        });
+        
+        const resultTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: tagTemp, arg2: (1 + exprTemps.length).toString(), result: resultTemp });
+        return resultTemp;
       }
 
       case ASTNodeType.ExpressionStatement:
@@ -138,169 +244,142 @@ export function generateIR(ast: Program): Quadruple[] {
         return null;
 
       case ASTNodeType.CallExpression: {
-        // print / console.log
-        const isPrint =
-          (node.callee.type === ASTNodeType.Identifier && node.callee.value === 'print') ||
-          (node.callee.type === ASTNodeType.MemberExpression &&
-            node.callee.object.value === 'console' &&
-            node.callee.property.value === 'log');
+          // Special case for print
+          if(node.callee.type === ASTNodeType.Identifier && node.callee.value === 'print') {
+              const args = node.arguments.map((arg: ASTNode) => gen(arg));
+              args.forEach((a: string) => {
+                 ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: a, arg2: null, result: null });
+              });
+              ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: 'print', arg2: args.length.toString(), result: null });
+              return null;
+          }
 
-        if (isPrint) {
-          node.arguments.forEach((a: ASTNode) => {
-            const arg = gen(a);
-            emit('PARAM', arg, null, null, line);
+          // Special case for console.log
+          if (node.callee.type === ASTNodeType.MemberExpression && 
+              node.callee.object.type === ASTNodeType.Identifier && 
+              node.callee.object.value === 'console' &&
+              node.callee.property.type === ASTNodeType.Identifier &&
+              node.callee.property.value === 'log') {
+              
+              const args = node.arguments.map((arg: ASTNode) => gen(arg));
+              args.forEach((a: string) => {
+                 ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: a, arg2: null, result: null });
+              });
+              ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: 'print', arg2: args.length.toString(), result: null });
+              return null;
+          }
+
+          // Generic call
+          const args = node.arguments.map((arg: ASTNode) => gen(arg));
+          args.forEach((a: string) => {
+             ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: a, arg2: null, result: null });
           });
-          emit('CALL', 'print', String(node.arguments.length), null, line);
-          return null;
-        }
-
-        // Generic call
-        const args = node.arguments.map((a: ASTNode) => gen(a));
-        args.forEach((a) => emit('PARAM', a, null, null, line));
-        const funcName = node.callee.type === ASTNodeType.Identifier
-          ? node.callee.value
-          : node.callee.object?.value + '.' + node.callee.property?.value;
-        const temp = newTemp();
-        emit('CALL', funcName, String(args.length), temp, line);
-        return temp;
+          
+          let funcName;
+          if (node.callee.type === ASTNodeType.Identifier) {
+            funcName = node.callee.value;
+          } else {
+            funcName = gen(node.callee);
+          }
+          
+          const temp = newTemp();
+          ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: funcName, arg2: args.length.toString(), result: temp });
+          return temp;
       }
 
       case ASTNodeType.IfStatement: {
-        const condition = gen(node.test);
-        const labelElse = newLabel();
-        const labelEnd = newLabel();
-        emit('IF_FALSE_GOTO', condition, null, labelElse, line);
-        gen(node.consequent);
-        emit('GOTO', null, null, labelEnd, line);
-        emit('LABEL', null, null, labelElse, line);
-        if (node.alternate) gen(node.alternate);
-        emit('LABEL', null, null, labelEnd, line);
-        return null;
+          const condition = gen(node.test);
+          const labelElse = newLabel();
+          const labelEnd = newLabel();
+          
+          ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: condition, arg2: null, result: labelElse });
+          gen(node.consequent);
+          ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: labelEnd });
+          
+          ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: labelElse });
+          if(node.alternate) {
+              gen(node.alternate);
+          }
+          ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: labelEnd });
+          return null;
       }
-
-      case ASTNodeType.WhileStatement: {
-        const loopStart = newLabel();
-        const loopEnd = newLabel();
-        loopStack.push({ breakLabel: loopEnd, continueLabel: loopStart });
-
-        emit('LABEL', null, null, loopStart, line);
-        const cond = gen(node.test);
-        emit('IF_FALSE_GOTO', cond, null, loopEnd, line);
-        gen(node.body);
-        emit('GOTO', null, null, loopStart, line);
-        emit('LABEL', null, null, loopEnd, line);
-
-        loopStack.pop();
-        return null;
-      }
-
-      case ASTNodeType.ForStatement: {
-        const loopStart = newLabel();
-        const loopUpdate = newLabel();
-        const loopEnd = newLabel();
-        loopStack.push({ breakLabel: loopEnd, continueLabel: loopUpdate });
-
-        // Init
-        if (node.init) gen(node.init);
-
-        emit('LABEL', null, null, loopStart, line);
-
-        // Condition guard
-        if (node.test) {
-          const cond = gen(node.test);
-          emit('IF_FALSE_GOTO', cond, null, loopEnd, line);
-        }
-
-        gen(node.body);
-
-        // Update
-        emit('LABEL', null, null, loopUpdate, line);
-        if (node.update) gen(node.update);
-
-        emit('GOTO', null, null, loopStart, line);
-        emit('LABEL', null, null, loopEnd, line);
-
-        loopStack.pop();
-        return null;
-      }
-
-      case ASTNodeType.BreakStatement: {
-        const top = loopStack[loopStack.length - 1];
-        emit('GOTO', null, null, top.breakLabel, line);
-        return null;
-      }
-
-      case ASTNodeType.ContinueStatement: {
-        const top = loopStack[loopStack.length - 1];
-        emit('GOTO', null, null, top.continueLabel, line);
-        return null;
-      }
-
+      
       case ASTNodeType.FunctionDeclaration: {
-        const funcEndLabel = newLabel();
-        emit('GOTO', null, null, funcEndLabel, line);
-        emit('FUNC_START', null, null, node.name, line);
-        emit('ENTER_SCOPE', null, null, null, line);
-        node.params.forEach((p: string) => emit('DEFINE_ARG', null, null, p, line));
-        gen(node.body);
-        emit('RETURN', '0', null, null, line);
-        emit('FUNC_END', null, null, node.name, line);
-        emit('EXIT_SCOPE', null, null, null, line);
-        emit('LABEL', null, null, funcEndLabel, line);
-        return null;
+          // Skip function generation in linear flow, jump over it
+          const funcEndLabel = newLabel();
+          ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: funcEndLabel });
+          
+          ir.push({ line: node.line, column: node.column, op: 'FUNC_START', arg1: null, arg2: null, result: node.name });
+          node.params.forEach((p: string) => {
+             ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
+          });
+          gen(node.body);
+          // Implicit return if missing
+          ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: '0', arg2: null, result: null });
+          ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: node.name });
+          
+          ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
+          return node.name;
       }
 
       case ASTNodeType.ReturnStatement: {
-        const val = node.argument ? gen(node.argument) : '0';
-        emit('RETURN', val, null, null, line);
-        return null;
+          const val = node.argument ? gen(node.argument) : '0';
+          ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: val, arg2: null, result: null });
+          return null;
+      }
+      
+      case ASTNodeType.ThrowStatement: {
+          const val = gen(node.argument);
+          ir.push({ line: node.line, column: node.column, op: 'THROW', arg1: val, arg2: null, result: null });
+          return null;
       }
 
-      // ──── Arrays ────
+      case ASTNodeType.ClassDeclaration: {
+        const classTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: '0', arg2: '', result: classTemp });
+        
+        if (node.superClass) {
+          ir.push({ line: node.line, column: node.column, op: 'EXTENDS', arg1: node.superClass, arg2: classTemp, result: null });
+        }
 
-      case ASTNodeType.ArrayExpression: {
-        const temp = newTemp();
-        const n = node.elements.length;
-        // Push each element; ARRAY_NEW n pops them in order
-        node.elements.forEach((el: ASTNode) => {
-          const v = gen(el);
-          emit('PARAM', v, null, null, line);
+        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: classTemp, arg2: null, result: node.name });
+        
+        node.body.forEach((member: ASTNode) => {
+          if (member.type === ASTNodeType.FunctionDeclaration) {
+            const funcName = gen(member);
+            ir.push({ line: node.line, column: node.column, op: 'SET_PROP', arg1: classTemp, arg2: member.name, result: funcName });
+          }
         });
-        emit('ARRAY_NEW', String(n), null, temp, line);
-        return temp;
-      }
-
-      case ASTNodeType.IndexExpression: {
-        const obj = gen(node.object);
-        const idx = gen(node.index);
-        const temp = newTemp();
-        emit('ARRAY_GET', obj, idx, temp, line);
-        return temp;
-      }
-
-      // ──── Objects ────
-
-      case ASTNodeType.ObjectExpression: {
-        const temp = newTemp();
-        const n = node.properties.length;
-        node.properties.forEach((p: { key: string; value: ASTNode }) => {
-          const v = gen(p.value);
-          emit('OBJ_PAIR', JSON.stringify(p.key), v, null, line);
-        });
-        emit('OBJ_NEW', String(n), null, temp, line);
-        return temp;
-      }
-
-      case ASTNodeType.MemberExpression: {
-        const obj = gen(node.object);
-        const key = JSON.stringify(node.property.value);
-        const temp = newTemp();
-        emit('OBJ_GET', obj, key, temp, line);
-        return temp;
+        return classTemp;
       }
     }
-
     return null;
+  }
+
+  function genDestructuring(target: ASTNode, val: string | null) {
+    if (target.type === ASTNodeType.ArrayPattern) {
+      target.elements.forEach((el: any, i: number) => {
+        if (el) {
+          const temp = newTemp();
+          ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: i.toString(), result: temp });
+          if (typeof el === 'string') {
+            ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: temp, arg2: null, result: el });
+          } else {
+            genDestructuring(el, temp);
+          }
+        }
+      });
+    } else if (target.type === ASTNodeType.ObjectPattern) {
+      target.properties.forEach((prop: any) => {
+        const temp = newTemp();
+        ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: prop.key, result: temp });
+        if (typeof prop.value === 'string') {
+          ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: temp, arg2: null, result: prop.value });
+        } else {
+          genDestructuring(prop.value, temp);
+        }
+      });
+    }
   }
 
   gen(ast);

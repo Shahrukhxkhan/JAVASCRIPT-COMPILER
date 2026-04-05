@@ -11,8 +11,10 @@ export interface Token {
 // --- AST Types ---
 export interface ASTNode {
   type: ASTNodeType;
-  line?: number;   // Source line (for source maps)
-  col?: number;    // Source column (for source maps)
+  start?: number;
+  end?: number;
+  line?: number;
+  column?: number;
   [key: string]: any;
 }
 
@@ -31,37 +33,32 @@ export interface SymbolInfo {
 export interface SemanticError {
   message: string;
   line?: number;
-}
-
-// --- Parse Errors (Error Recovery) ---
-export interface ParseError {
-  message: string;
-  line: number;
-  col: number;
-  recovered: boolean;
+  column?: number;
 }
 
 // --- IR (Intermediate Representation) ---
-// 3-Address Code (Quadruple) style
+// We'll use a 3-Address Code (Quadruple) style for IR
 export interface Quadruple {
   op: string;
   arg1: string | null;
   arg2: string | null;
   result: string | null;
-  sourceLine?: number;  // Source map: original source line
+  line?: number;
+  column?: number;
 }
 
 // --- Bytecode / VM ---
 export interface Instruction {
   op: OpCode;
   operand?: any;
-  sourceLine?: number;  // Source map: original source line
+  argCount?: number;
+  line?: number;
+  column?: number;
 }
 
 export interface CompilerResult {
   tokens: Token[];
   ast: Program | null;
-  parseErrors: ParseError[];
   semanticErrors: SemanticError[];
   ir: Quadruple[];
   optimizedIR: Quadruple[];
