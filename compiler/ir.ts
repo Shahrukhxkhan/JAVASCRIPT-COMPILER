@@ -69,7 +69,7 @@ export function generateIR(ast: Program): Quadruple[] {
           ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: finalVal, arg2: null, result: node.left.value });
         } else if (node.left.type === ASTNodeType.MemberExpression) {
           const obj = gen(node.left.object);
-          const prop = node.left.property.value;
+          const prop = node.left.computed ? gen(node.left.property) : `"${node.left.property.value}"`;
           ir.push({ line: node.line, column: node.column, op: 'SET_PROP', arg1: obj, arg2: prop, result: finalVal });
         }
         return finalVal;
@@ -77,7 +77,7 @@ export function generateIR(ast: Program): Quadruple[] {
 
       case ASTNodeType.MemberExpression: {
         const obj = gen(node.object);
-        const prop = node.computed ? gen(node.property) : node.property.value;
+        const prop = node.computed ? gen(node.property) : `"${node.property.value}"`;
         const temp = newTemp();
         ir.push({ line: node.line, column: node.column, op: 'GET_PROP', arg1: obj, arg2: prop, result: temp });
         return temp;
@@ -420,7 +420,10 @@ export function generateIR(ast: Program): Quadruple[] {
           ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: node.name });
           
           ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
-          return node.name;
+          
+          // Assign the function name to a variable so it can be passed around
+          ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: `"${node.name}"`, arg2: null, result: node.name });
+          return `"${node.name}"`;
       }
 
       case ASTNodeType.ReturnStatement: {

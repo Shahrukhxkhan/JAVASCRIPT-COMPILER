@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface EditorProps {
   value: string;
@@ -6,19 +6,22 @@ interface EditorProps {
 }
 
 const Editor: React.FC<EditorProps> = ({ value, onChange }) => {
+  const [isFocused, setIsFocused] = useState(false);
   const lineCount = value.split('\n').length;
 
   return (
-    <div className="flex h-full font-mono text-sm border border-gray-700 rounded-md overflow-hidden bg-gray-800">
-      <div className="bg-gray-900 text-gray-500 p-4 text-right select-none border-r border-gray-700 min-w-[3rem]">
+    <div className={`flex h-full font-mono text-sm border rounded-md overflow-hidden bg-panel transition-all duration-300 shadow-lg ${isFocused ? 'border-gold shadow-[0_0_15px_rgba(255,215,0,0.15)]' : 'border-gold-borderDark'}`}>
+      <div className="bg-background text-gold-muted p-4 text-right select-none border-r border-gold-borderDark min-w-[3rem] opacity-70">
         {Array.from({ length: lineCount }).map((_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
       </div>
       <textarea
-        className="w-full h-full p-4 bg-gray-800 text-gray-100 outline-none resize-none"
+        className="w-full h-full p-4 bg-panel text-text-primary outline-none resize-none custom-scrollbar"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
         spellCheck={false}
       />
     </div>

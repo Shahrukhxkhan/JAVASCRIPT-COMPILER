@@ -548,7 +548,7 @@ export class Parser {
         do {
           const key = this.consume(TokenType.Identifier, "Expected property name.").value;
           let value: ASTNode = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: key };
-          if (this.match(TokenType.Punctuation, ':')) {
+          if (this.match(TokenType.Operator, ':')) {
             value = this.expression();
           }
           properties.push({ key, value });
@@ -556,6 +556,25 @@ export class Parser {
       }
       this.consume(TokenType.Punctuation, '}', "Expected '}' after object.");
       return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ObjectExpression, properties };
+    }
+    if (this.matchKeyword('function')) {
+      let name;
+      if (this.check(TokenType.Identifier)) {
+        name = this.consume(TokenType.Identifier, "Expected function name.").value;
+      } else {
+        name = `anonymous_${Math.floor(Math.random() * 100000)}`;
+      }
+      this.consume(TokenType.Punctuation, '(', "Expected '(' after function name.");
+      const params: string[] = [];
+      if (!this.check(TokenType.Punctuation, ')')) {
+        do {
+          params.push(this.consume(TokenType.Identifier, "Expected parameter name.").value);
+        } while (this.match(TokenType.Punctuation, ','));
+      }
+      this.consume(TokenType.Punctuation, ')', "Expected ')' after parameters.");
+      this.consume(TokenType.Punctuation, '{', "Expected '{' before function body.");
+      const body = this.block();
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.FunctionDeclaration, name, params, body };
     }
     if (this.match(TokenType.Punctuation, '(')) {
       // Check for arrow function

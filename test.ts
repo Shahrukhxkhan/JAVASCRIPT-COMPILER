@@ -7,68 +7,65 @@ import { generateBytecode } from './compiler/codegen';
 import { VM } from './compiler/vm';
 
 const code = `
-// 1. if, else if, else
-let x = 15;
-if (x < 10) {
-  print("x is less than 10");
-} else if (x == 15) {
-  print("x is exactly 15");
+// 1. Booleans and logical operators
+let isTrue = true;
+let isFalse = false;
+print("true && false: " + (isTrue && isFalse));
+print("true || false: " + (isTrue || isFalse));
+
+// 2. Strings and escape sequences
+let str1 = "Hello";
+let str2 = 'World';
+let str3 = "Line 1\\nLine 2\\tTabbed";
+print(str1 + " " + str2);
+print(str3);
+
+// 3. Null and Undefined
+let n = null;
+let u = undefined;
+print("null == undefined: " + (n == u));
+print("null === undefined: " + (n === u));
+
+// 4. Arrays and methods
+let arr = [1, 2, 3];
+print("Array: " + arr);
+print("arr[0]: " + arr[0]);
+arr.push(4);
+print("After push(4): " + arr);
+let popped = arr.pop();
+print("Popped: " + popped);
+print("Length: " + arr.length);
+
+// Array map and filter
+let mapped = arr.map(function(x) { return x * 2; });
+print("Mapped (x * 2): " + mapped);
+let filtered = arr.filter(function(x) { return x > 1; });
+print("Filtered (x > 1): " + filtered);
+
+// 5. Objects and nested objects
+let obj = {
+  name: "Alice",
+  age: 30,
+  address: {
+    city: "Wonderland"
+  }
+};
+print("obj.name: " + obj.name);
+print("obj['age']: " + obj["age"]);
+print("obj.address.city: " + obj.address.city);
+obj.name = "Bob";
+print("Modified obj.name: " + obj.name);
+
+// 6. Type coercion
+print('"5" + 1 = ' + ("5" + 1));
+print('"5" - 1 = ' + ("5" - 1));
+if ("") {
+  print("Empty string is truthy");
 } else {
-  print("x is something else");
+  print("Empty string is falsy");
 }
-
-// 2. while loop
-let count = 0;
-while (count < 3) {
-  print("while loop count: " + count);
-  count = count + 1;
-}
-
-// 3. do...while loop
-let dCount = 0;
-do {
-  print("do-while loop count: " + dCount);
-  dCount = dCount + 1;
-} while (dCount < 2);
-
-// 4. for loop with break and continue
-for (let i = 0; i < 5; i = i + 1) {
-  if (i == 1) {
-    continue;
-  }
-  if (i == 3) {
-    break;
-  }
-  print("for loop i: " + i);
-}
-
-// 5. switch statement
-let fruit = "apple";
-switch (fruit) {
-  case "banana":
-    print("It's a banana");
-    break;
-  case "apple":
-    print("It's an apple");
-    break;
-  default:
-    print("Unknown fruit");
-}
-
-// 6. Ternary operator
-let age = 20;
-let status = age >= 18 ? "Adult" : "Minor";
-print("Status: " + status);
-
-// 7. try, catch, finally, throw
-try {
-  print("Inside try block");
-  throw "Custom Error!";
-  print("This should not print");
-} catch (e) {
-  print("Caught error: " + e);
-} finally {
-  print("Inside finally block");
+if ("hello") {
+  print("Non-empty string is truthy");
 }
 `;
 

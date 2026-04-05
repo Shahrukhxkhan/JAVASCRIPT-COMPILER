@@ -5,6 +5,72 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JS Compiler IDE</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              background: '#0a0a0a',
+              panel: '#1a1a1a',
+              gold: {
+                DEFAULT: '#FFD700',
+                warm: '#FFC107',
+                muted: '#B8860B',
+                dark: '#996515',
+                border: '#3a3000',
+                borderDark: '#5a4500',
+              },
+              text: {
+                primary: '#F5F5F5',
+                secondary: '#A0A0A0',
+              },
+              error: '#FF4444',
+              success: '#4CAF50',
+            },
+            fontFamily: {
+              sans: ['Inter', 'Poppins', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            backgroundImage: {
+              'noise': "url('data:image/svg+xml,%3Csvg viewBox=%220 0 200 200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter id=%22noiseFilter%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23noiseFilter)%22 opacity=%220.05%22/%3E%3C/svg%3E')",
+            }
+          }
+        }
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #1a1a1a;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #996515;
+        border-radius: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #FFD700;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.5s ease-out forwards;
+      }
+      
+      @keyframes slideUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-slide-up {
+        animation: slideUp 0.4s ease-out forwards;
+      }
+    </style>
   <script type="importmap">
 {
   "imports": {
@@ -16,8 +82,9 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-gray-900 text-white">
-    <div id="root"></div>
+  <body class="bg-background text-text-primary font-sans antialiased relative">
+    <div class="absolute inset-0 bg-noise pointer-events-none z-0"></div>
+    <div id="root" class="relative z-10"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

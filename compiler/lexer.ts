@@ -84,11 +84,27 @@ export function tokenize(source: string): Token[] {
       current++; // skip open quote
       column++;
       while (current < source.length && source[current] !== quote) {
-        if (source[current] === '\n') {
-          line++;
-          column = 1;
+        if (source[current] === '\\') {
+          current++;
+          column++;
+          if (current >= source.length) break;
+          const escapeChar = source[current];
+          switch (escapeChar) {
+            case 'n': value += '\n'; break;
+            case 't': value += '\t'; break;
+            case 'r': value += '\r'; break;
+            case '\\': value += '\\'; break;
+            case '"': value += '"'; break;
+            case "'": value += "'"; break;
+            default: value += escapeChar; break;
+          }
+        } else {
+          if (source[current] === '\n') {
+            line++;
+            column = 1;
+          }
+          value += source[current];
         }
-        value += source[current];
         current++;
         column++;
       }

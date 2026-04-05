@@ -203,7 +203,11 @@ export class VM {
             const key = this.safePop(inst, 'property access (key)');
             const obj = this.safePop(inst, 'property access (obj)');
             if (obj === null || obj === undefined) this.throwRuntimeError(inst, `Cannot read property '${key}' of ${obj}`);
-            this.stack.push(obj[key]);
+            let val = obj[key];
+            if (typeof val === 'function') {
+                val = val.bind(obj);
+            }
+            this.stack.push(val);
             break;
           }
 
@@ -302,7 +306,28 @@ export class VM {
                 const argCount = inst.argCount || 0;
                 const args = [];
                 for (let i = 0; i < argCount; i++) {
-                    args.unshift(this.safePop(inst, 'function call arguments'));
+                    let arg = this.safePop(inst, 'function call arguments');
+                    if (typeof arg === 'string' && this.labels.has(arg)) {
+                        const label = arg;
+                        arg = (...cbArgs: any[]) => {
+                            // Since we are inside run(), we can't easily re-enter the loop without a step function.
+                            // But we can create a new VM instance to run the callback!
+                            const cbVm = new VM(this.instructions, this.labels);
+                            cbVm.env = this.env; // Share environment
+                            cbVm.outputLog = this.outputLog; // Share output log
+                            cbVm.ip = this.labels.get(label)!;
+                            cbVm.callStack = [-1]; // Stop when returning from this function
+                            
+                            // Push arguments
+                            for (let j = cbArgs.length - 1; j >= 0; j--) {
+                                cbVm.stack.push(cbArgs[j]);
+                            }
+                            
+                            cbVm.run();
+                            return cbVm.stack.pop();
+                        };
+                    }
+                    args.unshift(arg);
                 }
                 const result = target(...args);
                 this.stack.push(result);
@@ -320,7 +345,7 @@ export class VM {
           }
 
           case OpCode.RET:
-              if (this.callStack.length === 0) {
+              if (this.callStack.length === 0 || this.callStack[this.callStack.length - 1] === -1) {
                   return this.outputLog;
               }
               this.ip = this.callStack.pop()!;
