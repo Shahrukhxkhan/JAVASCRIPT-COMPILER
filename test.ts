@@ -7,66 +7,24 @@ import { generateBytecode } from './compiler/codegen';
 import { VM } from './compiler/vm';
 
 const code = `
-// 1. Booleans and logical operators
-let isTrue = true;
-let isFalse = false;
-print("true && false: " + (isTrue && isFalse));
-print("true || false: " + (isTrue || isFalse));
-
-// 2. Strings and escape sequences
-let str1 = "Hello";
-let str2 = 'World';
-let str3 = "Line 1\\nLine 2\\tTabbed";
-print(str1 + " " + str2);
-print(str3);
-
-// 3. Null and Undefined
-let n = null;
-let u = undefined;
-print("null == undefined: " + (n == u));
-print("null === undefined: " + (n === u));
-
-// 4. Arrays and methods
-let arr = [1, 2, 3];
-print("Array: " + arr);
-print("arr[0]: " + arr[0]);
-arr.push(4);
-print("After push(4): " + arr);
-let popped = arr.pop();
-print("Popped: " + popped);
-print("Length: " + arr.length);
-
-// Array map and filter
-let mapped = arr.map(function(x) { return x * 2; });
-print("Mapped (x * 2): " + mapped);
-let filtered = arr.filter(function(x) { return x > 1; });
-print("Filtered (x > 1): " + filtered);
-
-// 5. Objects and nested objects
-let obj = {
-  name: "Alice",
-  age: 30,
-  address: {
-    city: "Wonderland"
-  }
-};
-print("obj.name: " + obj.name);
-print("obj['age']: " + obj["age"]);
-print("obj.address.city: " + obj.address.city);
-obj.name = "Bob";
-print("Modified obj.name: " + obj.name);
-
-// 6. Type coercion
-print('"5" + 1 = ' + ("5" + 1));
-print('"5" - 1 = ' + ("5" - 1));
-if ("") {
-  print("Empty string is truthy");
-} else {
-  print("Empty string is falsy");
+let arr = [10, 20, 30];
+for (let value of arr) {
+    print(value);
 }
-if ("hello") {
-  print("Non-empty string is truthy");
+
+const obj = { a: 1, b: 2 };
+for (let key in obj) {
+    print(key + ": " + obj[key]);
 }
+
+print(typeof 123);
+print(typeof "hello");
+print(typeof obj);
+print(typeof Array);
+
+print([] instanceof Object);
+print("a" in obj);
+print("c" in obj);
 `;
 
 try {

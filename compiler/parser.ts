@@ -144,16 +144,25 @@ export class Parser {
   }
 
   private funcDeclaration(isAsync: boolean = false): ASTNode {
+    let isGenerator = false;
+    if (this.match(TokenType.Operator, '*')) {
+        isGenerator = true;
+    }
     const name = this.consume(TokenType.Identifier, "Expected function name.");
-    return this.finishFunction(name.value, isAsync);
+    return this.finishFunction(name.value, isAsync, isGenerator);
   }
 
-  private finishFunction(name: string | null, isAsync: boolean = false): ASTNode {
+  private finishFunction(name: string | null, isAsync: boolean = false, isGenerator: boolean = false): ASTNode {
     this.consume(TokenType.Punctuation, '(', "Expected '(' after function name.");
     const params: string[] = [];
     if (!this.check(TokenType.Punctuation, ')')) {
       do {
-        params.push(this.consume(TokenType.Identifier, "Expected parameter name.").value);
+        if (this.match(TokenType.Punctuation, '...')) {
+          const restName = this.consume(TokenType.Identifier, "Expected rest parameter name.");
+          params.push('...' + restName.value);
+        } else {
+          params.push(this.consume(TokenType.Identifier, "Expected parameter name.").value);
+        }
       } while (this.match(TokenType.Punctuation, ','));
     }
     this.consume(TokenType.Punctuation, ')', "Expected ')' after parameters.");
@@ -163,7 +172,8 @@ export class Parser {
       name,
       params,
       body,
-      async: isAsync
+      async: isAsync,
+      generator: isGenerator
     };
   }
 
@@ -242,13 +252,51 @@ export class Parser {
   private forStatement(): ASTNode {
     this.consume(TokenType.Punctuation, '(', "Expected '(' after 'for'.");
     let init = null;
-    if (!this.match(TokenType.Punctuation, ';')) {
-      if (this.matchKeyword('let') || this.matchKeyword('const')) {
-        init = this.varDeclaration();
-      } else {
-        init = this.expressionStatement();
-      }
+    let isForIn = false;
+    let isForOf = false;
+    let kind = null;
+    
+    // Parse Initialization or For-In/Of left side
+    if (this.matchKeyword('let') || this.matchKeyword('const') || this.matchKeyword('var')) {
+        kind = this.previous().value;
+        const target = this.parseBindingPattern();
+        
+        if (this.matchKeyword('in')) {
+            isForIn = true;
+            init = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.VariableDeclaration, kind, target: typeof target !== 'string' ? target : undefined, name: typeof target === 'string' ? target : undefined, init: null };
+        } else if (this.matchKeyword('of')) {
+            isForOf = true;
+            init = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.VariableDeclaration, kind, target: typeof target !== 'string' ? target : undefined, name: typeof target === 'string' ? target : undefined, init: null };
+        } else {
+            // Normal variable declaration
+            let initVal = null;
+            if (this.match(TokenType.Operator, '=')) {
+                initVal = this.expression();
+            }
+            init = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.VariableDeclaration, kind, target: typeof target !== 'string' ? target : undefined, name: typeof target === 'string' ? target : undefined, init: initVal };
+            this.consume(TokenType.Punctuation, ';', "Expected ';' after variable declaration.");
+        }
+    } else if (!this.match(TokenType.Punctuation, ';')) {
+        const expr = this.expression();
+        if (this.matchKeyword('in')) {
+            isForIn = true;
+            init = expr;
+        } else if (this.matchKeyword('of')) {
+            isForOf = true;
+            init = expr;
+        } else {
+            init = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ExpressionStatement, expression: expr };
+            this.consume(TokenType.Punctuation, ';', "Expected ';' after loop initialization.");
+        }
     }
+
+    if (isForIn || isForOf) {
+        const iterable = this.expression();
+        this.consume(TokenType.Punctuation, ')', "Expected ')' after for clauses.");
+        const body = this.statement();
+        return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: isForIn ? ASTNodeType.ForInStatement : ASTNodeType.ForOfStatement, left: init, right: iterable, body };
+    }
+
     let condition = null;
     if (!this.match(TokenType.Punctuation, ';')) {
       condition = this.expression();
@@ -354,6 +402,18 @@ export class Parser {
   }
 
   private assignment(): ASTNode {
+    if (this.matchKeyword('yield')) {
+       const delegate = this.match(TokenType.Operator, '*');
+       let argument: ASTNode | null = null;
+       if (!this.check(TokenType.Punctuation, ';') && !this.check(TokenType.Punctuation, '}') && !this.check(TokenType.Punctuation, ')') && !this.check(TokenType.Punctuation, ']')) {
+           // We might just be at the end of an expression
+           // Try to parse the right side. If it's a newline scenario, technically JS has rules 
+           // against newline after yield. But we won't strictly enforce ASI rules here.
+           argument = this.assignment();
+       }
+       return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.YieldExpression, delegate, argument };
+    }
+
     const expr = this.ternary();
     if (this.match(TokenType.Operator, '=') || 
         this.match(TokenType.Operator, '+=') || 
@@ -417,7 +477,7 @@ export class Parser {
 
   private comparison(): ASTNode {
     let expr = this.term();
-    while (this.match(TokenType.Operator, '>') || this.match(TokenType.Operator, '<') || this.match(TokenType.Operator, '>=') || this.match(TokenType.Operator, '<=')) {
+    while (this.match(TokenType.Operator, '>') || this.match(TokenType.Operator, '<') || this.match(TokenType.Operator, '>=') || this.match(TokenType.Operator, '<=') || this.matchKeyword('instanceof') || this.matchKeyword('in')) {
        const operator = this.previous().value;
        const right = this.term();
        expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };
@@ -436,13 +496,22 @@ export class Parser {
   }
 
   private factor(): ASTNode {
-    let expr = this.call();
+    let expr = this.unary();
     while (this.match(TokenType.Operator, '*') || this.match(TokenType.Operator, '/')) {
       const operator = this.previous().value;
-      const right = this.call();
+      const right = this.unary();
       expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.BinaryExpression, operator, left: expr, right };
     }
     return expr;
+  }
+
+  private unary(): ASTNode {
+    if (this.match(TokenType.Operator, '!') || this.match(TokenType.Operator, '-') || this.matchKeyword('typeof')) {
+      const operator = this.previous().value;
+      const right = this.unary();
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.UnaryExpression, operator, argument: right };
+    }
+    return this.call();
   }
 
   private call(): ASTNode {

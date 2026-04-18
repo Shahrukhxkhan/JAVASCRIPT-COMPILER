@@ -39,6 +39,11 @@ export function analyze(ast: Program): SemanticError[] {
   symbolTable.define('print', 'const');
   symbolTable.define('console', 'const');
   symbolTable.define('Symbol', 'const');
+  symbolTable.define('Array', 'const');
+  symbolTable.define('Object', 'const');
+  symbolTable.define('String', 'const');
+  symbolTable.define('Number', 'const');
+  symbolTable.define('Boolean', 'const');
 
   let loopDepth = 0;
 

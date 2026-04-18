@@ -19,9 +19,21 @@ class Environment {
       return;
     }
     if (this.parent) {
+      // Don't auto-define temporaries on parent if we can implicitly do it locally
+      if (/^t[0-9]+$/.test(name)) {
+        this.define(name, value);
+        return;
+      }
       this.parent.set(name, value);
       return;
     }
+    
+    // Auto-define temporaries at top level too if needed
+    if (/^t[0-9]+$/.test(name)) {
+        this.define(name, value);
+        return;
+    }
+    
     throw new Error(`Reference Error - Identifier '${name}' is not defined.`);
   }
 
@@ -78,6 +90,11 @@ export class VM {
         this.outputLog.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
       }
     });
+    this.env.define('Object', Object, true);
+    this.env.define('Array', Array, true);
+    this.env.define('String', String, true);
+    this.env.define('Number', Number, true);
+    this.env.define('Boolean', Boolean, true);
     this.env.define('Symbol', Symbol);
   }
 
@@ -222,6 +239,65 @@ export class VM {
               const b = this.safePop(inst, 'nullish coalescing (NULLISH)');
               const a = this.safePop(inst, 'nullish coalescing (NULLISH)');
               this.stack.push(a ?? b);
+              break;
+          }
+          case OpCode.IN: {
+              const b = this.safePop(inst, 'in (IN RHS)');
+              const a = this.safePop(inst, 'in (IN LHS)');
+              if (typeof b !== 'object' || b === null) this.throwRuntimeError(inst, 'TypeError: right-hand side of in should be an object');
+              this.stack.push(a in b);
+              break;
+          }
+          case OpCode.INSTANCEOF: {
+              const b = this.safePop(inst, 'instanceof (INSTANCEOF RHS)');
+              const a = this.safePop(inst, 'instanceof (INSTANCEOF LHS)');
+              if (typeof b !== 'function') this.throwRuntimeError(inst, 'TypeError: Right-hand side of instanceof is not callable');
+              this.stack.push(a instanceof b);
+              break;
+          }
+          case OpCode.TYPEOF: {
+              const a = this.safePop(inst, 'typeof (TYPEOF)');
+              // need to unwrap closure to report 'function'
+              if (a && typeof a === 'object' && a.type === 'closure') {
+                 this.stack.push('function');
+              } else {
+                 this.stack.push(typeof a);
+              }
+              break;
+          }
+          case OpCode.NOT: {
+              const a = this.safePop(inst, 'logical NOT (NOT)');
+              this.stack.push(!a);
+              break;
+          }
+          case OpCode.NEG: {
+              const a = this.safePop(inst, 'unary negation (NEG)');
+              this.stack.push(-a);
+              break;
+          }
+
+          case OpCode.ITER_KEYS: {
+              const a = this.safePop(inst, 'iter keys target');
+              if (a === null || a === undefined) {
+                  this.stack.push([]);
+              } else {
+                  const keys = [];
+                  for (let k in a) {
+                      keys.push(k);
+                  }
+                  this.stack.push(keys);
+              }
+              break;
+          }
+          case OpCode.ITER_VALUES: {
+              const a = this.safePop(inst, 'iter values target');
+              if (a === null || a === undefined) {
+                  this.stack.push([]);
+              } else if (typeof a[Symbol.iterator] === 'function') {
+                  this.stack.push(Array.from(a));
+              } else {
+                  this.throwRuntimeError(inst, 'TypeError: Target is not iterable');
+              }
               break;
           }
 

@@ -20,6 +20,8 @@ export enum ASTNodeType {
   IfStatement = 'IfStatement',
   WhileStatement = 'WhileStatement',
   ForStatement = 'ForStatement',
+  ForInStatement = 'ForInStatement',
+  ForOfStatement = 'ForOfStatement',
   ReturnStatement = 'ReturnStatement',
   ExpressionStatement = 'ExpressionStatement',
   BinaryExpression = 'BinaryExpression',
@@ -48,7 +50,9 @@ export enum ASTNodeType {
   ObjectPattern = 'ObjectPattern',
   OptionalMemberExpression = 'OptionalMemberExpression',
   SpreadElement = 'SpreadElement',
-  NewExpression = 'NewExpression'
+  NewExpression = 'NewExpression',
+  UnaryExpression = 'UnaryExpression',
+  YieldExpression = 'YieldExpression'
 }
 
 export enum OpCode {
@@ -77,6 +81,11 @@ export enum OpCode {
   AND = 'AND',
   OR = 'OR',
   NULLISH = 'NULLISH',
+  IN = 'IN',
+  INSTANCEOF = 'INSTANCEOF',
+  TYPEOF = 'TYPEOF',
+  NOT = 'NOT',
+  NEG = 'NEG',
   ARRAY = 'ARRAY',   // Create array from N elements on stack
   OBJECT = 'OBJECT', // Create object from N key-value pairs on stack
   GET_PROP = 'GET_PROP', // Get property from object
@@ -93,5 +102,9 @@ export enum OpCode {
   ARRAY_REST = 'ARRAY_REST',
   OBJECT_REST = 'OBJECT_REST',
   REST_ARG = 'REST_ARG',
-  TEMPLATE = 'TEMPLATE'
+  TEMPLATE = 'TEMPLATE',
+  ITER_KEYS = 'ITER_KEYS',
+  ITER_VALUES = 'ITER_VALUES',
+  YIELD = 'YIELD',
+  YIELD_STAR = 'YIELD_STAR'
 }

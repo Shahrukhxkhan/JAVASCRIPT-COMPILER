@@ -4,8 +4,9 @@ import { TokenType } from '../constants';
 const KEYWORDS = new Set([
   'let', 'const', 'var', 'function', 'if', 'else', 'return', 'print',
   'while', 'do', 'for', 'break', 'continue', 'switch', 'case', 'default',
-  'try', 'catch', 'finally', 'class', 'extends',
-  'async', 'await', 'throw', 'new', 'this', 'super', 'true', 'false', 'null', 'undefined'
+  'try', 'catch', 'finally', 'class', 'extends', 'typeof', 'instanceof', 'in',
+  'async', 'await', 'throw', 'new', 'this', 'super', 'true', 'false', 'null', 'undefined',
+  'yield', 'import', 'export', 'of'
 ]);
 
 export function tokenize(source: string): Token[] {

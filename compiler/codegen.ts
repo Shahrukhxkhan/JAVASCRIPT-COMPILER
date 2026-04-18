@@ -142,7 +142,44 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         instructions.push({ line: q.line, column: q.column, op: OpCode.NULLISH }); 
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
         break;
+      case 'IN':
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.IN }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'INSTANCEOF':
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.INSTANCEOF }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
+      case 'TYPEOF':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.TYPEOF });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+      case 'NOT':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NOT });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+      case 'NEG':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NEG });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
       
+      case 'ITER_KEYS':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.ITER_KEYS });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+      case 'ITER_VALUES':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.ITER_VALUES });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
       case 'ARRAY': {
         const typesStr = q.arg1 || '';
         const elements = (q.arg2 || '').split(',').filter(e => e !== '');
@@ -318,6 +355,16 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
 
+      case 'YIELD':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.YIELD });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+      case 'YIELD_STAR':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.YIELD_STAR });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
       case 'RETURN':
         pushOperand(q.arg1, q);
         instructions.push({ line: q.line, column: q.column, op: OpCode.RET });

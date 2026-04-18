@@ -175,6 +175,54 @@ export function generateIR(ast: Program): Quadruple[] {
         return null;
       }
 
+      case ASTNodeType.ForInStatement:
+      case ASTNodeType.ForOfStatement: {
+        const rightVal = gen(node.right);
+        const iterTemp = newTemp();
+        const iterOp = node.type === ASTNodeType.ForInStatement ? 'ITER_KEYS' : 'ITER_VALUES';
+        ir.push({ line: node.line, column: node.column, op: iterOp, arg1: rightVal, arg2: null, result: iterTemp });
+        
+        const iTemp = newTemp();
+        const lenTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: '0', arg2: null, result: iTemp });
+        ir.push({ line: node.line, column: node.column, op: 'GET_PROP', arg1: iterTemp, arg2: '"length"', result: lenTemp });
+        
+        const startLabel = newLabel();
+        const continueLabel = newLabel();
+        const endLabel = newLabel();
+        loopStack.push({ start: continueLabel, end: endLabel });
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: startLabel });
+        const cmpTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'LT', arg1: iTemp, arg2: lenTemp, result: cmpTemp });
+        ir.push({ line: node.line, column: node.column, op: 'IF_FALSE_GOTO', arg1: cmpTemp, arg2: null, result: endLabel });
+        
+        const valTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'GET_PROP', arg1: iterTemp, arg2: iTemp, result: valTemp });
+        
+        if (node.left.type === ASTNodeType.VariableDeclaration) {
+            if (node.left.target) {
+                genDestructuring(node.left.target, valTemp, node.left.kind);
+            } else {
+                ir.push({ line: node.left.line, column: node.left.column, op: 'DECLARE', arg1: valTemp, arg2: node.left.kind, result: node.left.name });
+            }
+        } else if (node.left.type === ASTNodeType.Identifier) {
+            ir.push({ line: node.left.line, column: node.left.column, op: 'ASSIGN', arg1: valTemp, arg2: null, result: node.left.value });
+        }
+        
+        gen(node.body);
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: continueLabel });
+        const iNext = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'ADD', arg1: iTemp, arg2: '1', result: iNext });
+        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: iNext, arg2: null, result: iTemp });
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
+        
+        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
+        loopStack.pop();
+        return null;
+      }
+
       case ASTNodeType.BreakStatement: {
         if (loopStack.length > 0) {
           const endLabel = loopStack[loopStack.length - 1].end;
@@ -299,6 +347,20 @@ export function generateIR(ast: Program): Quadruple[] {
         return closureTemp;
       }
 
+      case ASTNodeType.UnaryExpression: {
+        const arg = gen(node.argument);
+        const temp = newTemp();
+        let opCode = '';
+        switch(node.operator) {
+            case '!': opCode = 'NOT'; break;
+            case '-': opCode = 'NEG'; break;
+            case 'typeof': opCode = 'TYPEOF'; break;
+            default: opCode = 'UNKNOWN';
+        }
+        ir.push({ line: node.line, column: node.column, op: opCode, arg1: arg, arg2: null, result: temp });
+        return temp;
+      }
+
       case ASTNodeType.BinaryExpression: {
         const t1 = gen(node.left);
         const t2 = gen(node.right);
@@ -320,6 +382,8 @@ export function generateIR(ast: Program): Quadruple[] {
             case '&&': opCode = 'AND'; break;
             case '||': opCode = 'OR'; break;
             case '??': opCode = 'NULLISH'; break;
+            case 'in': opCode = 'IN'; break;
+            case 'instanceof': opCode = 'INSTANCEOF'; break;
             default: opCode = 'UNKNOWN';
         }
         ir.push({ line: node.line, column: node.column, op: opCode, arg1: t1, arg2: t2, result: temp });
@@ -477,6 +541,17 @@ export function generateIR(ast: Program): Quadruple[] {
           return null;
       }
       
+      case ASTNodeType.YieldExpression: {
+        const temp = newTemp();
+        if (node.argument) {
+            const arg = gen(node.argument);
+            ir.push({ line: node.line, column: node.column, op: node.delegate ? 'YIELD_STAR' : 'YIELD', arg1: arg, arg2: null, result: temp });
+        } else {
+            ir.push({ line: node.line, column: node.column, op: node.delegate ? 'YIELD_STAR' : 'YIELD', arg1: 'undefined', arg2: null, result: temp });
+        }
+        return temp;
+      }
+
       case ASTNodeType.FunctionDeclaration: {
           // Skip function generation in linear flow, jump over it
           const funcEndLabel = newLabel();
@@ -503,7 +578,8 @@ export function generateIR(ast: Program): Quadruple[] {
           ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
           
           // Assign the function closure to a variable
-          ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${node.name}"`, arg2: 'false', result: node.name });
+          const flags = `false,${!!node.async},${!!node.generator}`;
+          ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${node.name}"`, arg2: flags, result: node.name });
           return node.name;
       }
 
