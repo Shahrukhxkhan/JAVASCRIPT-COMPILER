@@ -151,7 +151,7 @@ const App: React.FC = () => {
           <div className="w-6 h-6 rounded-sm bg-gradient-to-br from-gold to-gold-dark shadow-[0_0_10px_rgba(255,215,0,0.3)] flex items-center justify-center">
             <span className="text-background font-bold text-xs font-mono">JS</span>
           </div>
-          <h1 className="font-bold text-xl tracking-wide text-gold">JS Compiler <span className="text-gold-muted font-normal text-sm ml-2">from scratch</span></h1>
+          <h1 className="font-bold text-xl tracking-wide text-gold">JS Compiler</h1>
         </div>
         <div className="flex items-center gap-4">
           <button 

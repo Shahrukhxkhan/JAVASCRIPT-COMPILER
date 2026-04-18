@@ -171,11 +171,11 @@ export function tokenize(source: string): Token[] {
 
     // Punctuation and Operators
     const threeCharMap: Record<string, boolean> = {
-      '===': true, '!==': true
+      '===': true, '!==': true, '...': true
     };
     const threeChar = source.slice(current, current + 3);
     if (threeCharMap[threeChar]) {
-      tokens.push({ type: TokenType.Operator, value: threeChar, line, column });
+      tokens.push({ type: threeChar === '...' ? TokenType.Punctuation : TokenType.Operator, value: threeChar, line, column });
       current += 3;
       column += 3;
       continue;
@@ -184,7 +184,8 @@ export function tokenize(source: string): Token[] {
     const twoCharMap: Record<string, boolean> = { 
       '==': true, '<=': true, '>=': true, '!=': true,
       '=>': true, '++': true, '--': true, '+=': true,
-      '-=': true, '*=': true, '/=': true, '&&': true, '||': true
+      '-=': true, '*=': true, '/=': true, '&&': true, '||': true,
+      '??': true, '?.': true
     };
     const twoChar = source.slice(current, current + 2);
 

@@ -136,25 +136,34 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         instructions.push({ line: q.line, column: q.column, op: OpCode.OR }); 
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
         break;
+      case 'NULLISH':
+        pushOperand(q.arg1, q); 
+        pushOperand(q.arg2, q); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NULLISH }); 
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result }); 
+        break;
       
       case 'ARRAY': {
-        const count = parseInt(q.arg1 || '0');
+        const typesStr = q.arg1 || '';
         const elements = (q.arg2 || '').split(',').filter(e => e !== '');
         elements.forEach(e => pushOperand(e, q));
-        instructions.push({ line: q.line, column: q.column, op: OpCode.ARRAY, operand: count });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.ARRAY, operand: typesStr });
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
       }
 
       case 'OBJECT': {
-        const count = parseInt(q.arg1 || '0');
+        const typesStr = q.arg1 || '';
         const pairs = (q.arg2 || '').split(',').filter(p => p !== '');
         pairs.forEach(p => {
-          const [key, val] = p.split(':');
-          instructions.push({ line: q.line, column: q.column, op: OpCode.CONST, operand: key });
+          const [key, ...valParts] = p.split(':');
+          const val = valParts.join(':');
+          if (key !== 'null') {
+             instructions.push({ line: q.line, column: q.column, op: OpCode.CONST, operand: key });
+          }
           pushOperand(val, q);
         });
-        instructions.push({ line: q.line, column: q.column, op: OpCode.OBJECT, operand: count });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.OBJECT, operand: typesStr });
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
       }
@@ -163,6 +172,13 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         pushOperand(q.arg1, q);
         pushOperand(q.arg2, q);
         instructions.push({ line: q.line, column: q.column, op: OpCode.GET_PROP });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+
+      case 'GET_PROP_OPTIONAL':
+        pushOperand(q.arg1, q);
+        pushOperand(q.arg2, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.GET_PROP_OPTIONAL });
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
 
@@ -187,6 +203,23 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         instructions.push({ line: q.line, column: q.column, op: OpCode.THROW });
         break;
 
+      case 'TEMPLATE': {
+        const quasis = q.arg1 ? q.arg1.split('|::|') : [];
+        const exprs = q.arg2 ? q.arg2.split(',') : [];
+        
+        // Push quasis and expressions alternatingly
+        for (let i = 0; i < quasis.length; i++) {
+          instructions.push({ line: q.line, column: q.column, op: OpCode.CONST, operand: quasis[i] });
+          if (i < exprs.length) {
+            pushOperand(exprs[i], q);
+          }
+        }
+        
+        instructions.push({ line: q.line, column: q.column, op: OpCode.TEMPLATE, operand: quasis.length + exprs.length });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+      }
+
       case 'AWAIT':
         pushOperand(q.arg1, q);
         instructions.push({ line: q.line, column: q.column, op: OpCode.AWAIT });
@@ -197,6 +230,30 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         pushOperand(q.arg1, q); // parent
         pushOperand(q.arg2, q); // child
         instructions.push({ line: q.line, column: q.column, op: OpCode.EXTENDS });
+        break;
+
+      case 'DECLARE':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.DECLARE, operand: { name: q.result, kind: q.arg2 } });
+        break;
+
+      case 'ARRAY_REST':
+        pushOperand(q.arg1, q);
+        pushOperand(q.arg2, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.ARRAY_REST });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+        
+      case 'OBJECT_REST':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.CONST, operand: q.arg2 });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.OBJECT_REST });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
+
+      case 'CLOSURE':
+        instructions.push({ line: q.line, column: q.column, op: OpCode.CLOSURE, operand: { label: q.arg1?.replace(/^"|"$/g, ''), isArrow: q.arg2 === 'true' } });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
 
       case 'ASSIGN':
@@ -237,14 +294,26 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         if(q.arg1 === 'print') {
             instructions.push({ line: q.line, column: q.column, op: OpCode.PRINT, operand: parseInt(q.arg2 || '1', 10) });
         } else {
+            const [typesStr, ctxStr] = (q.arg2 || '').split('|::|');
+            pushOperand(ctxStr || 'null', q);
             // Store the function name as operand. If it's a label, it will be backpatched.
-            // Also store the argument count so the VM knows how many arguments to pop.
-            instructions.push({ line: q.line, column: q.column, op: OpCode.CALL, operand: q.arg1, argCount: parseInt(q.arg2 || '0', 10) });
+            // Also store the argument types string so the VM knows how to spread arguments.
+            instructions.push({ line: q.line, column: q.column, op: OpCode.CALL, operand: q.arg1, argCount: typesStr });
             if(q.arg1) jumpsToFix.push({ index: instructions.length - 1, label: q.arg1 });
             if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         }
         break;
+
+      case 'NEW':
+        pushOperand(q.arg1, q);
+        instructions.push({ line: q.line, column: q.column, op: OpCode.NEW, argCount: q.arg2 });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        break;
       
+      case 'REST_ARG':
+        instructions.push({ line: q.line, column: q.column, op: OpCode.REST_ARG, operand: { index: q.arg1, total: q.arg2, name: q.result } });
+        break;
+
       case 'ARG':
         if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;

@@ -41,9 +41,13 @@ export function generateIR(ast: Program): Quadruple[] {
           // Destructuring
           const val = gen(node.init);
           genDestructuring(node.target, val);
-        } else if (node.name && node.init) {
-          const val = gen(node.init);
-          ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: val, arg2: null, result: node.name });
+        } else if (node.name) {
+          if (node.init) {
+            const val = gen(node.init);
+            ir.push({ line: node.line, column: node.column, op: 'DECLARE', arg1: val, arg2: node.kind, result: node.name });
+          } else {
+            ir.push({ line: node.line, column: node.column, op: 'DECLARE', arg1: 'undefined', arg2: node.kind, result: node.name });
+          }
         }
         return null;
 
@@ -83,17 +87,41 @@ export function generateIR(ast: Program): Quadruple[] {
         return temp;
       }
 
-      case ASTNodeType.ArrayExpression: {
-        const elements = node.elements.map((e: ASTNode) => gen(e));
+      case ASTNodeType.OptionalMemberExpression: {
+        const obj = gen(node.object);
+        const prop = node.computed ? gen(node.property) : `"${node.property.value}"`;
         const temp = newTemp();
-        ir.push({ line: node.line, column: node.column, op: 'ARRAY', arg1: elements.length.toString(), arg2: elements.join(','), result: temp });
+        ir.push({ line: node.line, column: node.column, op: 'GET_PROP_OPTIONAL', arg1: obj, arg2: prop, result: temp });
+        return temp;
+      }
+
+      case ASTNodeType.ArrayExpression: {
+        const types: string[] = [];
+        const elements = node.elements.map((e: ASTNode) => {
+          if (e.type === ASTNodeType.SpreadElement) {
+             types.push('spread');
+             return gen(e.argument);
+          }
+          types.push('normal');
+          return gen(e);
+        });
+        const temp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'ARRAY', arg1: types.join(','), arg2: elements.join(','), result: temp });
         return temp;
       }
 
       case ASTNodeType.ObjectExpression: {
-        const props = node.properties.map((p: any) => `${p.key}:${gen(p.value)}`);
+        const types: string[] = [];
+        const props = node.properties.map((p: any) => {
+           if (p.isSpread) {
+              types.push('spread');
+              return `null:${gen(p.value)}`;
+           }
+           types.push('normal');
+           return `${p.key}:${gen(p.value)}`;
+        });
         const temp = newTemp();
-        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: props.length.toString(), arg2: props.join(','), result: temp });
+        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: types.join(','), arg2: props.join(','), result: temp });
         return temp;
       }
 
@@ -247,8 +275,14 @@ export function generateIR(ast: Program): Quadruple[] {
         const funcEndLabel = newLabel();
         ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: funcEndLabel });
         ir.push({ line: node.line, column: node.column, op: 'FUNC_START', arg1: null, arg2: null, result: funcName });
-        node.params.forEach((p: string) => {
-          ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p });
+        const paramsReversed = [...node.params].reverse();
+        paramsReversed.forEach((p: string, paramIndex: number) => {
+          const originalIndex = node.params.length - 1 - paramIndex;
+          if (p.startsWith('...')) {
+              ir.push({ line: node.line, column: node.column, op: 'REST_ARG', arg1: originalIndex.toString(), arg2: node.params.length.toString(), result: p.slice(3) }); 
+          } else {
+              ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
+          }
         });
         if (node.body.type === ASTNodeType.BlockStatement) {
           gen(node.body);
@@ -259,7 +293,10 @@ export function generateIR(ast: Program): Quadruple[] {
         ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: '0', arg2: null, result: null });
         ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: funcName });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
-        return funcName;
+        
+        const closureTemp = newTemp();
+        ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${funcName}"`, arg2: 'true', result: closureTemp });
+        return closureTemp;
       }
 
       case ASTNodeType.BinaryExpression: {
@@ -282,6 +319,7 @@ export function generateIR(ast: Program): Quadruple[] {
             case '<=': opCode = 'LTE'; break;
             case '&&': opCode = 'AND'; break;
             case '||': opCode = 'OR'; break;
+            case '??': opCode = 'NULLISH'; break;
             default: opCode = 'UNKNOWN';
         }
         ir.push({ line: node.line, column: node.column, op: opCode, arg1: t1, arg2: t2, result: temp });
@@ -371,20 +409,54 @@ export function generateIR(ast: Program): Quadruple[] {
           }
 
           // Generic call
-          const args = node.arguments.map((arg: ASTNode) => gen(arg));
+          const callTypes: string[] = [];
+          const args = node.arguments.map((arg: ASTNode) => {
+             if (arg.type === ASTNodeType.SpreadElement) {
+                 callTypes.push('spread');
+                 return gen(arg.argument);
+             }
+             callTypes.push('normal');
+             return gen(arg);
+          });
           args.forEach((a: string) => {
              ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: a, arg2: null, result: null });
           });
           
           let funcName;
-          if (node.callee.type === ASTNodeType.Identifier) {
+          let ctxTemp = 'null';
+          if (node.callee.type === ASTNodeType.MemberExpression || node.callee.type === ASTNodeType.OptionalMemberExpression) {
+             ctxTemp = gen(node.callee.object);
+             funcName = newTemp();
+             const prop = node.callee.computed ? gen(node.callee.property) : `"${node.callee.property.value}"`;
+             ir.push({ line: node.line, column: node.column, op: node.callee.type === ASTNodeType.MemberExpression ? 'GET_PROP' : 'GET_PROP_OPTIONAL', arg1: ctxTemp, arg2: prop, result: funcName });
+          } else if (node.callee.type === ASTNodeType.Identifier) {
             funcName = node.callee.value;
           } else {
             funcName = gen(node.callee);
           }
           
           const temp = newTemp();
-          ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: funcName, arg2: args.length.toString(), result: temp });
+          ir.push({ line: node.line, column: node.column, op: 'CALL', arg1: funcName, arg2: `${callTypes.join(',')}|::|${ctxTemp}`, result: temp });
+          return temp;
+      }
+
+      case ASTNodeType.NewExpression: {
+          const callTypes: string[] = [];
+          const args = node.arguments.map((arg: ASTNode) => {
+             if (arg.type === ASTNodeType.SpreadElement) {
+                 callTypes.push('spread');
+                 return gen(arg.argument);
+             }
+             callTypes.push('normal');
+             return gen(arg);
+          });
+          args.forEach((a: string) => {
+             ir.push({ line: node.line, column: node.column, op: 'PARAM', arg1: a, arg2: null, result: null });
+          });
+          
+          const funcName = gen(node.callee);
+          const temp = newTemp();
+          ir.push({ line: node.line, column: node.column, op: 'NEW', arg1: funcName, arg2: callTypes.join(','), result: temp });
           return temp;
       }
 
@@ -411,8 +483,17 @@ export function generateIR(ast: Program): Quadruple[] {
           ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: funcEndLabel });
           
           ir.push({ line: node.line, column: node.column, op: 'FUNC_START', arg1: null, arg2: null, result: node.name });
-          node.params.forEach((p: string) => {
-             ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
+          
+          // ARG instructions pop from the stack. To get arguments in correct order (since param n is at top of stack),
+          // we need to process them in reverse order.
+          const paramsReversed = [...node.params].reverse();
+          paramsReversed.forEach((p: string, paramIndex: number) => {
+             const originalIndex = node.params.length - 1 - paramIndex;
+             if (p.startsWith('...')) {
+                 ir.push({ line: node.line, column: node.column, op: 'REST_ARG', arg1: originalIndex.toString(), arg2: node.params.length.toString(), result: p.slice(3) }); 
+             } else {
+                 ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
+             }
           });
           gen(node.body);
           // Implicit return if missing
@@ -421,9 +502,9 @@ export function generateIR(ast: Program): Quadruple[] {
           
           ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
           
-          // Assign the function name to a variable so it can be passed around
-          ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: `"${node.name}"`, arg2: null, result: node.name });
-          return `"${node.name}"`;
+          // Assign the function closure to a variable
+          ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${node.name}"`, arg2: 'false', result: node.name });
+          return node.name;
       }
 
       case ASTNodeType.ReturnStatement: {
@@ -460,27 +541,64 @@ export function generateIR(ast: Program): Quadruple[] {
     return null;
   }
 
-  function genDestructuring(target: ASTNode, val: string | null) {
+  function genDestructuring(target: ASTNode, val: string | null, kind: string = 'let') {
     if (target.type === ASTNodeType.ArrayPattern) {
       target.elements.forEach((el: any, i: number) => {
         if (el) {
+          const { pattern, isRest, default: defaultValue } = el;
           const temp = newTemp();
-          ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: i.toString(), result: temp });
-          if (typeof el === 'string') {
-            ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: temp, arg2: null, result: el });
+          
+          if (isRest) {
+              ir.push({ line: target.line, column: target.column, op: 'ARRAY_REST', arg1: val, arg2: i.toString(), result: temp });
           } else {
-            genDestructuring(el, temp);
+              ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: i.toString(), result: temp });
+
+              if (defaultValue) {
+                  const defaultValTemp = gen(defaultValue);
+                  // Optional: handle default assignment if temp is undefined
+                  const labelSkip = newLabel();
+                  const cmpTemp = newTemp();
+                  ir.push({ line: target.line, column: target.column, op: 'EQ_STRICT', arg1: temp, arg2: 'undefined', result: cmpTemp });
+                  ir.push({ line: target.line, column: target.column, op: 'IF_FALSE_GOTO', arg1: cmpTemp, arg2: null, result: labelSkip });
+                  ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: defaultValTemp, arg2: null, result: temp });
+                  ir.push({ line: target.line, column: target.column, op: 'LABEL', arg1: null, arg2: null, result: labelSkip });
+              }
+          }
+
+          if (typeof pattern === 'string') {
+            ir.push({ line: target.line, column: target.column, op: 'DECLARE', arg1: temp, arg2: kind, result: pattern });
+          } else {
+            genDestructuring(pattern, temp, kind);
           }
         }
       });
     } else if (target.type === ASTNodeType.ObjectPattern) {
+      const parsedKeys: string[] = [];
       target.properties.forEach((prop: any) => {
+        const { key, value, isRest, default: defaultValue } = prop;
         const temp = newTemp();
-        ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: prop.key, result: temp });
-        if (typeof prop.value === 'string') {
-          ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: temp, arg2: null, result: prop.value });
+        
+        if (isRest) {
+            ir.push({ line: target.line, column: target.column, op: 'OBJECT_REST', arg1: val, arg2: parsedKeys.join(','), result: temp });
         } else {
-          genDestructuring(prop.value, temp);
+            parsedKeys.push(key);
+            ir.push({ line: target.line, column: target.column, op: 'GET_PROP', arg1: val, arg2: `"${key}"`, result: temp });
+            
+            if (defaultValue) {
+                const defaultValTemp = gen(defaultValue);
+                const labelSkip = newLabel();
+                const cmpTemp = newTemp();
+                ir.push({ line: target.line, column: target.column, op: 'EQ_STRICT', arg1: temp, arg2: 'undefined', result: cmpTemp });
+                ir.push({ line: target.line, column: target.column, op: 'IF_FALSE_GOTO', arg1: cmpTemp, arg2: null, result: labelSkip });
+                ir.push({ line: target.line, column: target.column, op: 'ASSIGN', arg1: defaultValTemp, arg2: null, result: temp });
+                ir.push({ line: target.line, column: target.column, op: 'LABEL', arg1: null, arg2: null, result: labelSkip });
+            }
+        }
+
+        if (typeof value === 'string') {
+          ir.push({ line: target.line, column: target.column, op: 'DECLARE', arg1: temp, arg2: kind, result: value });
+        } else {
+          genDestructuring(value, temp, kind);
         }
       });
     }

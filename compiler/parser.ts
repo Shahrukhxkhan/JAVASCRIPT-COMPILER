@@ -54,12 +54,21 @@ export class Parser {
 
   private parseBindingPattern(): string | ASTNode {
     if (this.match(TokenType.Punctuation, '[')) {
-      const elements: (string | ASTNode | null)[] = [];
+      const elements: any[] = [];
       while (!this.check(TokenType.Punctuation, ']')) {
         if (this.match(TokenType.Punctuation, ',')) {
           elements.push(null);
         } else {
-          elements.push(this.parseBindingPattern());
+          let isRest = false;
+          if (this.match(TokenType.Punctuation, '...')) {
+            isRest = true;
+          }
+          let pattern = this.parseBindingPattern();
+          let defaultValue = null;
+          if (!isRest && this.match(TokenType.Operator, '=')) {
+              defaultValue = this.expression();
+          }
+          elements.push({ pattern, isRest, default: defaultValue });
           if (!this.check(TokenType.Punctuation, ']')) {
             this.consume(TokenType.Punctuation, ',');
           }
@@ -69,14 +78,29 @@ export class Parser {
       return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ArrayPattern, elements };
     }
     if (this.match(TokenType.Punctuation, '{')) {
-      const properties: { key: string, value: string | ASTNode }[] = [];
+      const properties: any[] = [];
       while (!this.check(TokenType.Punctuation, '}')) {
+        let isRest = false;
+        if (this.match(TokenType.Punctuation, '...')) {
+          isRest = true;
+          const restTarget = this.consume(TokenType.Identifier, "Expected identifier after rest element.").value;
+          properties.push({ key: null, value: restTarget, isRest });
+          if (!this.check(TokenType.Punctuation, '}')) {
+            this.consume(TokenType.Punctuation, ',');
+          }
+          continue;
+        }
+        
         const key = this.consume(TokenType.Identifier, "Expected property name.").value;
         let value: string | ASTNode = key;
         if (this.match(TokenType.Punctuation, ':')) {
           value = this.parseBindingPattern();
         }
-        properties.push({ key, value });
+        let defaultValue = null;
+        if (this.match(TokenType.Operator, '=')) {
+            defaultValue = this.expression();
+        }
+        properties.push({ key, value, isRest: false, default: defaultValue });
         if (!this.check(TokenType.Punctuation, '}')) {
           this.consume(TokenType.Punctuation, ',');
         }
@@ -426,6 +450,14 @@ export class Parser {
     while (true) {
         if (this.match(TokenType.Punctuation, '(')) {
             expr = this.finishCall(expr);
+        } else if (this.match(TokenType.Operator, '?.')) {
+            const name = this.consume(TokenType.Identifier, "Expected property name after '?.'.");
+            expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.OptionalMemberExpression,
+                object: expr,
+                property: { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: name.value },
+                computed: false,
+                optional: true
+            };
         } else if (this.match(TokenType.Punctuation, '.')) {
             const name = this.consume(TokenType.Identifier, "Expected property name after '.'.");
             expr = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.MemberExpression,
@@ -458,7 +490,11 @@ export class Parser {
       const args: ASTNode[] = [];
       if (!this.check(TokenType.Punctuation, ')')) {
           do {
-              args.push(this.expression());
+              if (this.match(TokenType.Punctuation, '...')) {
+                  args.push({ line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.SpreadElement, argument: this.expression() });
+              } else {
+                  args.push(this.expression());
+              }
           } while (this.match(TokenType.Punctuation, ','));
       }
       this.consume(TokenType.Punctuation, ')', "Expected ')' after arguments.");
@@ -470,13 +506,30 @@ export class Parser {
 
   private primary(): ASTNode {
     if (this.matchKeyword('new')) {
-      const callee = this.consume(TokenType.Identifier, "Expected class name after 'new'.");
-      this.consume(TokenType.Punctuation, '(', "Expected '(' after class name.");
-      // Simplified new: just call the class as a function for now
-      this.consume(TokenType.Punctuation, ')', "Expected ')' after new.");
-      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.CallExpression,
-        callee: { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: callee.value },
-        arguments: []
+      let callee;
+      if (this.match(TokenType.Identifier)) {
+          callee = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: this.previous()!.value };
+      } else {
+          callee = this.expression();
+      }
+      
+      let args: ASTNode[] = [];
+      if (this.match(TokenType.Punctuation, '(')) {
+          if (!this.check(TokenType.Punctuation, ')')) {
+              do {
+                  if (this.match(TokenType.Punctuation, '...')) {
+                      args.push({ line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.SpreadElement, argument: this.expression() });
+                  } else {
+                      args.push(this.expression());
+                  }
+              } while (this.match(TokenType.Punctuation, ','));
+          }
+          this.consume(TokenType.Punctuation, ')', "Expected ')' after new arguments.");
+      }
+      
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.NewExpression,
+        callee: callee,
+        arguments: args
       };
     }
     if (this.matchKeyword('true')) return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Literal, value: true };
@@ -519,6 +572,9 @@ export class Parser {
       };
     }
 
+    if (this.matchKeyword('this')) {
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: 'this' };
+    }
     if (this.match(TokenType.Identifier)) {
       const id = this.previous().value;
       if (this.match(TokenType.Operator, '=>')) {
@@ -536,22 +592,30 @@ export class Parser {
       const elements: ASTNode[] = [];
       if (!this.check(TokenType.Punctuation, ']')) {
         do {
-          elements.push(this.expression());
+          if (this.match(TokenType.Punctuation, '...')) {
+            elements.push({ line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.SpreadElement, argument: this.expression() });
+          } else {
+            elements.push(this.expression());
+          }
         } while (this.match(TokenType.Punctuation, ','));
       }
       this.consume(TokenType.Punctuation, ']', "Expected ']' after array.");
       return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.ArrayExpression, elements };
     }
     if (this.match(TokenType.Punctuation, '{')) {
-      const properties: { key: string, value: ASTNode }[] = [];
+      const properties: { key: string | null, value: ASTNode, isSpread?: boolean }[] = [];
       if (!this.check(TokenType.Punctuation, '}')) {
         do {
-          const key = this.consume(TokenType.Identifier, "Expected property name.").value;
-          let value: ASTNode = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: key };
-          if (this.match(TokenType.Operator, ':')) {
-            value = this.expression();
+          if (this.match(TokenType.Punctuation, '...')) {
+            properties.push({ key: null, value: this.expression(), isSpread: true });
+          } else {
+            const key = this.consume(TokenType.Identifier, "Expected property name.").value;
+            let value: ASTNode = { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: key };
+            if (this.match(TokenType.Punctuation, ':') || this.match(TokenType.Operator, ':')) {
+              value = this.expression();
+            }
+            properties.push({ key, value });
           }
-          properties.push({ key, value });
         } while (this.match(TokenType.Punctuation, ','));
       }
       this.consume(TokenType.Punctuation, '}', "Expected '}' after object.");
@@ -565,10 +629,16 @@ export class Parser {
         name = `anonymous_${Math.floor(Math.random() * 100000)}`;
       }
       this.consume(TokenType.Punctuation, '(', "Expected '(' after function name.");
-      const params: string[] = [];
+      const params: any[] = [];
       if (!this.check(TokenType.Punctuation, ')')) {
         do {
-          params.push(this.consume(TokenType.Identifier, "Expected parameter name.").value);
+          let isRest = false;
+          if (this.match(TokenType.Punctuation, '...')) {
+            isRest = true;
+          }
+          const paramName = this.consume(TokenType.Identifier, "Expected parameter name.").value;
+          params.push(isRest ? `...${paramName}` : paramName);
+          if (isRest) break;
         } while (this.match(TokenType.Punctuation, ','));
       }
       this.consume(TokenType.Punctuation, ')', "Expected ')' after parameters.");
@@ -580,10 +650,16 @@ export class Parser {
       // Check for arrow function
       const start = this.current;
       try {
-        const params: string[] = [];
+        const params: any[] = [];
         if (!this.check(TokenType.Punctuation, ')')) {
           do {
-            params.push(this.consume(TokenType.Identifier, "Expected parameter.").value);
+            let isRest = false;
+            if (this.match(TokenType.Punctuation, '...')) {
+              isRest = true;
+            }
+            const paramName = this.consume(TokenType.Identifier, "Expected parameter.").value;
+            params.push(isRest ? `...${paramName}` : paramName);
+            if (isRest) break;
           } while (this.match(TokenType.Punctuation, ','));
         }
         this.consume(TokenType.Punctuation, ')', "Expected ')' after params.");

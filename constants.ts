@@ -45,7 +45,10 @@ export enum ASTNodeType {
   ConditionalExpression = 'ConditionalExpression',
   AwaitExpression = 'AwaitExpression',
   ArrayPattern = 'ArrayPattern',
-  ObjectPattern = 'ObjectPattern'
+  ObjectPattern = 'ObjectPattern',
+  OptionalMemberExpression = 'OptionalMemberExpression',
+  SpreadElement = 'SpreadElement',
+  NewExpression = 'NewExpression'
 }
 
 export enum OpCode {
@@ -73,13 +76,22 @@ export enum OpCode {
   GTE = 'GTE',
   AND = 'AND',
   OR = 'OR',
+  NULLISH = 'NULLISH',
   ARRAY = 'ARRAY',   // Create array from N elements on stack
   OBJECT = 'OBJECT', // Create object from N key-value pairs on stack
   GET_PROP = 'GET_PROP', // Get property from object
+  GET_PROP_OPTIONAL = 'GET_PROP_OPTIONAL', // Get property from object safely
   SET_PROP = 'SET_PROP', // Set property on object
+  NEW = 'NEW', // Create new object from class
   TRY_START = 'TRY_START', // Push exception handler to stack
   TRY_END = 'TRY_END',     // Pop exception handler
   THROW = 'THROW',         // Throw exception
   AWAIT = 'AWAIT',         // Yield execution (simulated)
-  EXTENDS = 'EXTENDS'      // Basic inheritance
+  EXTENDS = 'EXTENDS',      // Basic inheritance
+  DECLARE = 'DECLARE',      // declare variable (arg1: kind "let"|"const"|"var")
+  CLOSURE = 'CLOSURE',      // create closure object on stack
+  ARRAY_REST = 'ARRAY_REST',
+  OBJECT_REST = 'OBJECT_REST',
+  REST_ARG = 'REST_ARG',
+  TEMPLATE = 'TEMPLATE'
 }
