@@ -40,7 +40,7 @@ try {
   const optimizedIR = optimize(ir);
   const { instructions: bytecode, labels } = generateBytecode(optimizedIR);
   const vm = new VM(bytecode, labels);
-  const logs = vm.run();
+  const logs = await vm.runAsync();
   console.log("LOGS:");
   console.log(logs.join('\n'));
 } catch (e) {
