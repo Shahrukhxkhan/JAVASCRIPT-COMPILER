@@ -122,7 +122,7 @@ export function analyze(ast: Program): SemanticError[] {
              errors.push({ message: `Illegal '${node.type === ASTNodeType.BreakStatement ? 'break' : 'continue'}' statement outside of a loop or switch.`, line: node.line, column: node.column });
          }
      } else if (node.type === ASTNodeType.Identifier) {
-         if(!symbolTable.resolve(node.value)) {
+         if(node.value !== 'this' && !symbolTable.resolve(node.value)) {
              errors.push({ message: `Undeclared identifier '${node.value}'.`, line: node.line, column: node.column });
          }
      } else if (node.type === ASTNodeType.MemberExpression) {

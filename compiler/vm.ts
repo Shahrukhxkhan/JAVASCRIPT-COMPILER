@@ -51,6 +51,7 @@ export class VM {
   private callStack: number[] = []; // Stores return IPs
   private envStack: Environment[] = []; // Stores environments for calls
   private argCountStack: number[] = []; // Stores number of arguments passed in current call
+  private isConstructorStack: { isConstructor: boolean, instance: any }[] = [];
   private currentArgCount: number = 0;
 
   private labels: Map<string, number> = new Map();
@@ -570,10 +571,12 @@ export class VM {
           }
 
           case OpCode.EXTENDS: {
-            const parent = this.safePop(inst, 'extends (parent)');
             const child = this.safePop(inst, 'extends (child)');
+            const parent = this.safePop(inst, 'extends (parent)');
             if (typeof parent === 'object' && parent !== null && typeof child === 'object' && child !== null) {
               Object.assign(child, parent);
+              // Also properly set the prototype chain!
+              Object.setPrototypeOf(child, parent);
             }
             break;
           }
@@ -695,7 +698,11 @@ export class VM {
             
             // If classObj has a constructor method, call it!
             if (typeof classObj.constructor === 'function') {
-                classObj.constructor.apply(instance, args);
+                if (classObj.constructor === Object) {
+                    // It's just the default Object constructor, ignore
+                } else {
+                    classObj.constructor.apply(instance, args);
+                }
             } else if (typeof classObj.constructor === 'object' && classObj.constructor.type === 'closure') {
                 // Execute VM closure as constructor
                 const target = classObj.constructor;
@@ -704,6 +711,7 @@ export class VM {
                   this.throwRuntimeError(inst, `RangeError: Maximum call stack size exceeded`);
                 }
                 this.callStack.push(this.ip + 1);
+                this.isConstructorStack.push({ isConstructor: true, instance: instance });
                 for (const a of args) {
                   this.stack.push(a);
                 }
@@ -713,27 +721,7 @@ export class VM {
                 this.env = new Environment(target.env); 
                 this.env.define('this', instance, false);
                 this.ip = this.labels.get(target.label)!;
-                // VM stack expects constructors to implicitly/explicitly return this if object,
-                // but since our compiler isn't rewriting returns yet, 
-                // we'll push instance to stack right now, and let `new` evaluate to instance
-                // Wait, if it jumps to constructor, the `NEW` instruction finishes and we jump.
-                // Upon RET, it returns a value.
-                // This means 'new' acts exactly like a CALL except it returns `instance`.
-                // Actually, if we push it to callstack, when the constructor RETs, it pushes the returned value.
-                // We'd have to intercept the RET to ensure `instance` is kept, or just inject instructions.
-                // It's easier to run it synchronously on a new VM instance!
-                const cbVm = new VM(this.instructions, this.labels);
-                cbVm.env = new Environment(target.env);
-                cbVm.env.define('this', instance, false);
-                cbVm.outputLog = this.outputLog; 
-                cbVm.ip = this.labels.get(target.label)!;
-                cbVm.callStack = [-1]; 
-                cbVm.currentArgCount = args.length;
-                for (let j = 0; j < args.length; j++) {
-                    cbVm.stack.push(args[j]);
-                }
-                cbVm.runSync();
-                this.callStack.pop(); // Remove the +1 injected
+                continue;
             }
             this.stack.push(instance);
             break;
@@ -744,6 +732,7 @@ export class VM {
               this.throwRuntimeError(inst, `RangeError: Maximum call stack size exceeded`);
             }
             this.callStack.push(this.ip + 1);
+            this.isConstructorStack.push({ isConstructor: false, instance: null });
             let target = inst.operand;
             
             const ctx = this.safePop(inst, 'call context (this)');
@@ -802,6 +791,7 @@ export class VM {
                   const promise = cbVm.runAsync().then(() => cbVm.stack.pop());
                   this.stack.push(promise);
                   this.callStack.pop(); // Remove the +1 from CALL
+                  this.isConstructorStack.pop();
                   break;
               }
 
@@ -867,6 +857,7 @@ export class VM {
                 this.stack.push(result);
                 // Pop the return address since we didn't actually jump
                 this.callStack.pop();
+                this.isConstructorStack.pop();
                 break;
             }
 
@@ -888,14 +879,26 @@ export class VM {
             continue;
           }
 
-          case OpCode.RET:
+          case OpCode.RET: {
               if (this.callStack.length === 0 || this.callStack[this.callStack.length - 1] === -1) {
                   return this.outputLog;
               }
               this.ip = this.callStack.pop()!;
               this.env = this.envStack.pop()!;
               this.currentArgCount = this.argCountStack.pop()!;
+              
+              const isConstructorCall = this.isConstructorStack.pop();
+              if (isConstructorCall && isConstructorCall.isConstructor) {
+                  const retVal = this.stack.pop();
+                  if (typeof retVal === 'object' && retVal !== null) {
+                      this.stack.push(retVal);
+                  } else {
+                      this.stack.push(isConstructorCall.instance);
+                  }
+              }
+              
               continue;
+          }
 
           default:
             this.throwRuntimeError(inst, `Illegal OpCode '${inst.op}' at address ${this.ip}`);
