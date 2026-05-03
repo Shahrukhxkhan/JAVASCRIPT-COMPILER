@@ -644,6 +644,7 @@ export function generateIR(ast: Program): Quadruple[] {
           
           // Assign the function closure to a variable
           const flags = `false,${!!node.async},${!!node.generator}`;
+          ir.push({ line: node.line, column: node.column, op: 'DECLARE', arg1: 'undefined', arg2: 'var', result: node.name });
           ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${node.name}"`, arg2: flags, result: node.name });
           return node.name;
       }

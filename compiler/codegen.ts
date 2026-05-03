@@ -362,7 +362,7 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         break;
 
       case 'ARG':
-        if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.DECLARE, operand: { name: q.result, kind: 'let' } });
         break;
 
       case 'YIELD':

@@ -18,20 +18,13 @@ class Environment {
       this.vars.set(name, value);
       return;
     }
-    if (this.parent) {
-      // Don't auto-define temporaries on parent if we can implicitly do it locally
-      if (/^t[0-9]+$/.test(name)) {
-        this.define(name, value);
-        return;
-      }
-      this.parent.set(name, value);
+    if (/^t[0-9]+(_inline_[0-9]+)?$/.test(name)) {
+      this.define(name, value);
       return;
     }
-    
-    // Auto-define temporaries at top level too if needed
-    if (/^t[0-9]+$/.test(name)) {
-        this.define(name, value);
-        return;
+    if (this.parent) {
+      this.parent.set(name, value);
+      return;
     }
     
     throw new Error(`ReferenceError: ${name} is not defined`);
