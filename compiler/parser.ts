@@ -644,6 +644,9 @@ export class Parser {
     if (this.matchKeyword('this')) {
       return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: 'this' };
     }
+    if (this.matchKeyword('super')) {
+      return { line: this.previous()?.line || 1, column: this.previous()?.column || 1, type: ASTNodeType.Identifier, value: 'super' };
+    }
     if (this.match(TokenType.Identifier)) {
       const id = this.previous().value;
       if (this.match(TokenType.Operator, '=>')) {

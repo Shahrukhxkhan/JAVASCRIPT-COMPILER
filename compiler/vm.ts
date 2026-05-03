@@ -9,32 +9,25 @@ class Environment {
   get(name: string): any {
     if (this.vars.has(name)) return this.vars.get(name);
     if (this.parent) return this.parent.get(name);
-    throw new Error(`Reference Error - Identifier '${name}' is not defined.`);
+    throw new Error(`ReferenceError: ${name} is not defined`);
   }
 
   set(name: string, value: any) {
     if (this.vars.has(name)) {
-      if (this.consts.has(name)) throw new Error(`TypeError: Assignment to constant variable '${name}'.`);
+      if (this.consts.has(name)) throw new Error(`TypeError: Assignment to constant variable`);
       this.vars.set(name, value);
       return;
     }
+    if (/^t[0-9]+(_inline_[0-9]+)?$/.test(name)) {
+      this.define(name, value);
+      return;
+    }
     if (this.parent) {
-      // Don't auto-define temporaries on parent if we can implicitly do it locally
-      if (/^t[0-9]+$/.test(name)) {
-        this.define(name, value);
-        return;
-      }
       this.parent.set(name, value);
       return;
     }
     
-    // Auto-define temporaries at top level too if needed
-    if (/^t[0-9]+$/.test(name)) {
-        this.define(name, value);
-        return;
-    }
-    
-    throw new Error(`Reference Error - Identifier '${name}' is not defined.`);
+    throw new Error(`ReferenceError: ${name} is not defined`);
   }
 
   define(name: string, value: any, isConst: boolean = false) {
@@ -68,7 +61,7 @@ export class VM {
     this.reset();
   }
 
-  private exceptionStack: number[] = [];
+  private exceptionStack: { catchIp: number | null, finallyIp: number | null, isUnwinding?: boolean, error?: any }[] = [];
 
   reset() {
     this.stack = [];
@@ -96,18 +89,69 @@ export class VM {
     this.env.define('Number', Number, true);
     this.env.define('Boolean', Boolean, true);
     this.env.define('Symbol', Symbol);
+    this.env.define('Error', Error, true);
+    this.env.define('TypeError', TypeError, true);
+    this.env.define('ReferenceError', ReferenceError, true);
+    this.env.define('SyntaxError', SyntaxError, true);
+    this.env.define('RangeError', RangeError, true);
+    this.env.define('URIError', URIError, true);
+    this.env.define('EvalError', EvalError, true);
+  }
+
+  private buildStackTrace(inst: Instruction | undefined): string {
+    const trace: string[] = [];
+    // Current instruction (we don't have func names in VM, so fallback to anonymous)
+    const getFuncForIp = (targetIp: number) => {
+        return 'anonymous';
+    };
+    
+    // Format a single frame
+    const formatFrame = (targetIp: number, instruction: Instruction | undefined) => {
+        const funcName = targetIp === this.instructions.length ? 'main' : getFuncForIp(targetIp);
+        let loc = 'unknown';
+        if (instruction && instruction.line !== undefined) {
+             loc = `main.js:${instruction.line}`;
+             // if (instruction.column) loc += `:${instruction.column}`;
+        }
+        return `    at ${funcName === 'anonymous' ? 'main' : funcName} (${loc})`;
+    };
+
+    trace.push(formatFrame(this.ip, inst));
+    
+    // Add call stack frames
+    for (let i = this.callStack.length - 1; i >= 0; i--) {
+        const retIp = this.callStack[i];
+        if (retIp >= 0) {
+            const callInst = this.instructions[retIp - 1]; // The CALL instruction
+            trace.push(formatFrame(retIp - 1, callInst));
+        }
+    }
+    
+    return trace.join('\n');
   }
 
   private throwRuntimeError(inst: Instruction | undefined, message: string): never {
-    let loc = '';
-    if (inst && inst.line !== undefined) {
-      loc = `[Line ${inst.line}`;
-      if (inst.column !== undefined) {
-        loc += `:${inst.column}`;
-      }
-      loc += `] `;
+    let ErrorClass: any = Error;
+    let actualMessage = message;
+    
+    const colonIndex = message.indexOf(':');
+    if (colonIndex > -1) {
+        const prefix = message.slice(0, colonIndex).trim();
+        if (prefix === 'TypeError') ErrorClass = TypeError;
+        else if (prefix === 'ReferenceError' || prefix === 'Reference Error') ErrorClass = ReferenceError;
+        else if (prefix === 'SyntaxError') ErrorClass = SyntaxError;
+        else if (prefix === 'RangeError') ErrorClass = RangeError;
+        else if (prefix === 'URIError') ErrorClass = URIError;
+        else if (prefix === 'EvalError') ErrorClass = EvalError;
+        
+        if (ErrorClass !== Error) {
+            actualMessage = message.slice(colonIndex + 1).trim();
+        }
     }
-    throw new Error(`${loc}Runtime Error: ${message}`);
+
+    const err = new ErrorClass(actualMessage);
+    err.stack = `${err.name}: ${actualMessage}\n${this.buildStackTrace(inst)}`;
+    throw err;
   }
 
   private safePop(inst: Instruction | undefined, context: string): any {
@@ -117,37 +161,110 @@ export class VM {
     return this.stack.pop();
   }
 
-  run(): string[] {
+  runSync(): string[] {
+    const gen = this.runGen();
+    let res;
+    try {
+        res = gen.next();
+        while (!res.done) {
+            if (res.value && typeof res.value.then === 'function') {
+                throw new Error("SyntaxError: await is only valid in async functions");
+            }
+            res = gen.next(res.value);
+        }
+    } catch (e) {
+        return this.handleRunError(e, () => this.runSync());
+    }
+    return res.value;
+  }
+
+  async runAsync(): Promise<string[]> {
+    const gen = this.runGen();
+    let res;
+    try {
+        res = gen.next();
+        while (!res.done) {
+            try {
+                const val = await res.value;
+                res = gen.next(val);
+            } catch (innerE) {
+                res = gen.throw(innerE);
+            }
+        }
+    } catch (e) {
+        return this.handleRunError(e, () => this.runAsync());
+    }
+    return res.value;
+  }
+
+  private handleRunError(e: any, retryFn: () => any): any {
+      if (this.exceptionStack.length > 0) {
+        const handler = this.exceptionStack.pop()!;
+        
+        if (handler.catchIp !== null) {
+            this.ip = handler.catchIp;
+            this.exceptionStack.push({ catchIp: null, finallyIp: handler.finallyIp, isUnwinding: false });
+            this.stack.push(e); 
+            return retryFn();
+        } else if (handler.finallyIp !== null) {
+            this.ip = handler.finallyIp;
+            this.exceptionStack.push({ catchIp: null, finallyIp: null, isUnwinding: true, error: e });
+            return retryFn();
+        } else {
+            throw e;
+        }
+      }
+      
+      const errMessage = e && e.stack ? e.stack : (e && e.message ? e.message : String(e));
+      
+      // If we are executing inside a sub-VM (callStack has -1), we must re-throw to reject 
+      // the returned Promise (if async) or propagate the JS error to the caller hook!
+      if (this.callStack.length > 0 && this.callStack[0] === -1) {
+          throw e;
+      }
+      
+      this.outputLog.push(`Uncaught ${errMessage}`);
+      return this.outputLog;
+  }
+
+  *runGen(): IterableIterator<any> {
     const MAX_STEPS = 15000;
     let steps = 0;
 
-    try {
-      while (this.ip < this.instructions.length) {
-        if (steps++ > MAX_STEPS) {
-          this.throwRuntimeError(undefined, "Execution limit exceeded. Possible infinite loop detected.");
-        }
+    // We no longer try/catch here, it's handled by outer runners
+    while (this.ip < this.instructions.length) {
+      if (steps++ > MAX_STEPS) {
+        this.throwRuntimeError(undefined, "Execution limit exceeded. Possible infinite loop detected.");
+      }
 
-        const inst = this.instructions[this.ip];
+      const inst = this.instructions[this.ip];
         
-        switch (inst.op) {
-          case OpCode.HALT:
-            return this.outputLog;
+      switch (inst.op) {
+        case OpCode.HALT:
+          return this.outputLog;
 
           case OpCode.CONST:
             this.stack.push(inst.operand);
             break;
 
           case OpCode.LOAD:
+            if (inst.operand === 'super' && !this.env.has('super')) {
+                this.throwRuntimeError(inst, `SyntaxError: 'super' keyword unexpected here`);
+            }
             if (this.env.has(inst.operand)) {
                 this.stack.push(this.env.get(inst.operand));
             } else {
-                this.throwRuntimeError(inst, `Reference Error - Identifier '${inst.operand}' is not defined.`);
+                this.throwRuntimeError(inst, `ReferenceError: ${inst.operand} is not defined`);
             }
             break;
 
           case OpCode.STORE:
-            const val = this.safePop(inst, 'assignment (STORE)');
-            this.env.set(inst.operand, val);
+            try {
+                const val = this.safePop(inst, 'assignment (STORE)');
+                this.env.set(inst.operand, val);
+            } catch (e: any) {
+                this.throwRuntimeError(inst, e.message);
+            }
             break;
 
           case OpCode.ADD: {
@@ -379,7 +496,7 @@ export class VM {
           case OpCode.GET_PROP: {
             const key = this.safePop(inst, 'property access (key)');
             const obj = this.safePop(inst, 'property access (obj)');
-            if (obj === null || obj === undefined) this.throwRuntimeError(inst, `Cannot read property '${key}' of ${obj}`);
+            if (obj === null || obj === undefined) this.throwRuntimeError(inst, `TypeError: Cannot read properties of ${obj} (reading '${key}')`);
             let val = obj[key];
             if (typeof val === 'function') {
                 val = val.bind(obj);
@@ -408,14 +525,16 @@ export class VM {
             const value = this.safePop(inst, 'property assignment (value)');
             const key = this.safePop(inst, 'property assignment (key)');
             const obj = this.safePop(inst, 'property assignment (obj)');
-            if (obj === null || obj === undefined) this.throwRuntimeError(inst, `Cannot set property '${key}' of ${obj}`);
+            if (obj === null || obj === undefined) this.throwRuntimeError(inst, `TypeError: Cannot set properties of ${obj} (setting '${key}')`);
             obj[key] = value;
             break;
           }
 
-          case OpCode.TRY_START:
-            this.exceptionStack.push(inst.operand);
+          case OpCode.TRY_START: {
+            const handlers = inst.operand as { catchLabel: number | null, finallyLabel: number | null };
+            this.exceptionStack.push({ catchIp: handlers.catchLabel, finallyIp: handlers.finallyLabel });
             break;
+          }
 
           case OpCode.TRY_END:
             this.exceptionStack.pop();
@@ -423,19 +542,32 @@ export class VM {
 
           case OpCode.THROW: {
             const error = this.safePop(inst, 'throw');
-            if (this.exceptionStack.length === 0) {
-              this.throwRuntimeError(inst, `Uncaught Exception: ${error}`);
-            }
-            this.ip = this.exceptionStack.pop()!;
-            this.stack.push(error); // Pass error to catch block
-            continue;
+            // We throw the error internally so the VM catch block handles it
+            throw error;
           }
 
-          case OpCode.AWAIT:
-            // Simulated await
-            const promise = this.safePop(inst, 'await');
-            this.stack.push(promise); 
+          case OpCode.FINALLY_END: {
+            if (this.exceptionStack.length > 0) {
+              const currentHandler = this.exceptionStack[this.exceptionStack.length - 1];
+              if (currentHandler.isUnwinding) {
+                const error = currentHandler.error;
+                this.exceptionStack.pop();
+                throw error; // Let the VM catch block handle propagating it further
+              }
+            }
             break;
+          }
+
+          case OpCode.AWAIT: {
+            const promise = this.safePop(inst, 'await');
+            if (promise && typeof promise.then === 'function') {
+                const result = yield promise;
+                this.stack.push(result);
+            } else {
+                this.stack.push(promise);
+            }
+            break;
+          }
 
           case OpCode.EXTENDS: {
             const parent = this.safePop(inst, 'extends (parent)');
@@ -485,8 +617,8 @@ export class VM {
           }
 
           case OpCode.CLOSURE: {
-            const { label, isArrow } = inst.operand;
-            this.stack.push({ type: 'closure', label, env: this.env, isArrow });
+            const { label, isArrow, isAsync, isGenerator } = inst.operand as any;
+            this.stack.push({ type: 'closure', label, env: this.env, isArrow, isAsync, isGenerator });
             break;
           }
 
@@ -568,6 +700,9 @@ export class VM {
                 // Execute VM closure as constructor
                 const target = classObj.constructor;
                 const finalArgCount = args.length;
+                if (this.callStack.length >= 1000) {
+                  this.throwRuntimeError(inst, `RangeError: Maximum call stack size exceeded`);
+                }
                 this.callStack.push(this.ip + 1);
                 for (const a of args) {
                   this.stack.push(a);
@@ -597,7 +732,7 @@ export class VM {
                 for (let j = 0; j < args.length; j++) {
                     cbVm.stack.push(args[j]);
                 }
-                cbVm.run();
+                cbVm.runSync();
                 this.callStack.pop(); // Remove the +1 injected
             }
             this.stack.push(instance);
@@ -605,6 +740,9 @@ export class VM {
           }
 
           case OpCode.CALL: {
+            if (this.callStack.length >= 1000) {
+              this.throwRuntimeError(inst, `RangeError: Maximum call stack size exceeded`);
+            }
             this.callStack.push(this.ip + 1);
             let target = inst.operand;
             
@@ -650,6 +788,23 @@ export class VM {
             }
 
             if (target && typeof target === 'object' && target.type === 'closure') {
+              if (target.isAsync) {
+                  const cbVm = new VM(this.instructions, this.labels);
+                  cbVm.env = new Environment(target.env);
+                  if (!target.isArrow) cbVm.env.define('this', ctx, false);
+                  cbVm.outputLog = this.outputLog;
+                  cbVm.ip = this.labels.get(target.label)!;
+                  cbVm.callStack = [-1];
+                  cbVm.currentArgCount = finalArgCount;
+                  for (const a of args) cbVm.stack.push(a);
+                  
+                  // Wait for runAsync to finish logging and handling unwinding, then return the stack's top value
+                  const promise = cbVm.runAsync().then(() => cbVm.stack.pop());
+                  this.stack.push(promise);
+                  this.callStack.pop(); // Remove the +1 from CALL
+                  break;
+              }
+
               // Push expanded arguments to stack
               for (const a of args) {
                   this.stack.push(a);
@@ -675,36 +830,34 @@ export class VM {
                         arg = (...cbArgs: any[]) => {
                             const cbVm = new VM(this.instructions, this.labels);
                             cbVm.env = new Environment(closure.env);
-                            // Arrow functions inherit `this` by closure
-                            cbVm.outputLog = this.outputLog; // Share output log
+                            cbVm.outputLog = this.outputLog; 
                             cbVm.ip = this.labels.get(closure.label)!;
-                            cbVm.callStack = [-1]; // Stop when returning from this function
+                            cbVm.callStack = [-1]; 
                             cbVm.currentArgCount = cbArgs.length;
-                            
-                            // Push arguments
                             for (let j = 0; j < cbArgs.length; j++) {
                                 cbVm.stack.push(cbArgs[j]);
                             }
-                            
-                            cbVm.run();
-                            return cbVm.stack.pop();
+                            if (closure.isAsync) {
+                                return cbVm.runAsync().then(() => cbVm.stack.pop());
+                            } else {
+                                cbVm.runSync();
+                                return cbVm.stack.pop();
+                            }
                         };
                     } else if (typeof arg === 'string' && this.labels.has(arg)) {
                         const label = arg;
                         arg = (...cbArgs: any[]) => {
                             const cbVm = new VM(this.instructions, this.labels);
-                            cbVm.env = new Environment(this.env); // Share environment
-                            cbVm.outputLog = this.outputLog; // Share output log
+                            cbVm.env = new Environment(this.env);
+                            cbVm.outputLog = this.outputLog;
                             cbVm.ip = this.labels.get(label)!;
-                            cbVm.callStack = [-1]; // Stop when returning from this function
+                            cbVm.callStack = [-1];
                             cbVm.currentArgCount = cbArgs.length;
-                            
-                            // Push arguments (stack order = last pushed is first popped = arg n)
                             for (let j = 0; j < cbArgs.length; j++) {
                                 cbVm.stack.push(cbArgs[j]);
                             }
-                            
-                            cbVm.run();
+                            // label hooks are sync
+                            cbVm.runSync();
                             return cbVm.stack.pop();
                         };
                     }
@@ -718,7 +871,7 @@ export class VM {
             }
 
             if (typeof target !== 'number') {
-              this.throwRuntimeError(inst, `'${inst.operand}' is not a callable function (resolved to ${JSON.stringify(target)}).`);
+              this.throwRuntimeError(inst, `TypeError: ${inst.operand} is not a function`);
             }
             
             // Standard function call (no closure data available)
@@ -750,15 +903,6 @@ export class VM {
 
         this.ip++;
       }
-    } catch (e: any) {
-      if (this.exceptionStack.length > 0) {
-        this.ip = this.exceptionStack.pop()!;
-        this.stack.push(e.message);
-        return this.run(); // Continue from catch
-      }
-      this.outputLog.push(e.message);
-    }
-
-    return this.outputLog;
+      return this.outputLog;
   }
 }

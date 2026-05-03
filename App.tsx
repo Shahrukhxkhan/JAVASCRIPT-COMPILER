@@ -91,7 +91,7 @@ const App: React.FC = () => {
     setError(null);
     
     // Simulate a slight delay for the loading animation
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         // 1. Lexer
         const tokens = tokenize(code);
@@ -119,7 +119,7 @@ const App: React.FC = () => {
 
         // 7. Execution (VM)
         const vm = new VM(bytecode, labels);
-        const logs = vm.run();
+        const logs = await vm.runAsync();
 
         setResult({
           tokens,
@@ -140,7 +140,7 @@ const App: React.FC = () => {
       } finally {
         setIsCompiling(false);
       }
-    }, 300);
+    }, 100);
   };
 
   return (

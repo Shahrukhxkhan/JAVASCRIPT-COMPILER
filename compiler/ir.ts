@@ -18,6 +18,7 @@ export function generateIR(ast: Program): Quadruple[] {
   labelCounter = 0;
   const ir: Quadruple[] = [];
   const loopStack: { start: string, end: string }[] = [];
+  const finallyStack: { node: ASTNode, depth: number }[] = [];
 
   function gen(node: ASTNode): string | null {
     if (!node) return null;
@@ -226,6 +227,13 @@ export function generateIR(ast: Program): Quadruple[] {
       case ASTNodeType.BreakStatement: {
         if (loopStack.length > 0) {
           const endLabel = loopStack[loopStack.length - 1].end;
+          const currentLoopDepth = loopStack.length;
+          // Execute finally blocks that are inside this loop
+          for (let i = finallyStack.length - 1; i >= 0; i--) {
+              if (finallyStack[i].depth >= currentLoopDepth) {
+                  gen(finallyStack[i].node);
+              }
+          }
           ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: endLabel });
         }
         return null;
@@ -234,6 +242,13 @@ export function generateIR(ast: Program): Quadruple[] {
       case ASTNodeType.ContinueStatement: {
         if (loopStack.length > 0) {
           const startLabel = loopStack[loopStack.length - 1].start;
+          const currentLoopDepth = loopStack.length;
+          // Execute finally blocks that are inside this loop
+          for (let i = finallyStack.length - 1; i >= 0; i--) {
+              if (finallyStack[i].depth >= currentLoopDepth) {
+                  gen(finallyStack[i].node);
+              }
+          }
           ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: startLabel });
         }
         return null;
@@ -295,19 +310,48 @@ export function generateIR(ast: Program): Quadruple[] {
 
       case ASTNodeType.TryStatement: {
         const catchLabel = newLabel();
+        const finallyLabel = newLabel();
         const endLabel = newLabel();
-        ir.push({ line: node.line, column: node.column, op: 'TRY_START', arg1: null, arg2: null, result: catchLabel });
-        gen(node.block);
-        ir.push({ line: node.line, column: node.column, op: 'TRY_END', arg1: null, arg2: null, result: null });
-        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: endLabel });
+
+        const hasCatch = !!node.handler;
+        const hasFinally = !!node.finalizer;
+
+        ir.push({ line: node.line, column: node.column, op: 'TRY_START', arg1: hasCatch ? `"${catchLabel}"` : null, arg2: hasFinally ? `"${finallyLabel}"` : null, result: null });
         
-        ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: catchLabel });
-        if (node.handler) {
+        if (hasFinally) finallyStack.push({ node: node.finalizer, depth: loopStack.length });
+        
+        gen(node.block);
+        
+        ir.push({ line: node.line, column: node.column, op: 'TRY_END', arg1: null, arg2: null, result: null });
+        if (hasFinally) finallyStack.pop();
+        ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: hasFinally ? finallyLabel : endLabel });
+        
+        if (hasCatch) {
+          ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: catchLabel });
+          
+          if (hasFinally) {
+            ir.push({ line: node.line, column: node.column, op: 'TRY_START', arg1: null, arg2: `"${finallyLabel}"`, result: null });
+            finallyStack.push({ node: node.finalizer, depth: loopStack.length });
+          }
+          
           ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: node.handler.param });
           gen(node.handler.body);
+          
+          if (hasFinally) {
+            ir.push({ line: node.line, column: node.column, op: 'TRY_END', arg1: null, arg2: null, result: null });
+            finallyStack.pop();
+          }
+          
+          ir.push({ line: node.line, column: node.column, op: 'GOTO', arg1: null, arg2: null, result: hasFinally ? finallyLabel : endLabel });
         }
+        
+        if (hasFinally) {
+          ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: finallyLabel });
+          gen(node.finalizer);
+          ir.push({ line: node.line, column: node.column, op: 'FINALLY_END', arg1: null, arg2: null, result: null });
+        }
+        
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: endLabel });
-        if (node.finalizer) gen(node.finalizer);
         return null;
       }
 
@@ -332,18 +376,29 @@ export function generateIR(ast: Program): Quadruple[] {
               ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
           }
         });
+        
+        const oldLoopStack = [...loopStack];
+        const oldFinallyStack = [...finallyStack];
+        loopStack.length = 0;
+        finallyStack.length = 0;
+        
         if (node.body.type === ASTNodeType.BlockStatement) {
           gen(node.body);
         } else {
           const val = gen(node.body);
           ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: val, arg2: null, result: null });
         }
+        
+        loopStack.push(...oldLoopStack);
+        finallyStack.push(...oldFinallyStack);
+        
         ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: '0', arg2: null, result: null });
         ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: funcName });
         ir.push({ line: node.line, column: node.column, op: 'LABEL', arg1: null, arg2: null, result: funcEndLabel });
         
         const closureTemp = newTemp();
-        ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${funcName}"`, arg2: 'true', result: closureTemp });
+        const flags = `true,${!!node.async},${!!node.generator}`;
+        ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${funcName}"`, arg2: flags, result: closureTemp });
         return closureTemp;
       }
 
@@ -570,7 +625,17 @@ export function generateIR(ast: Program): Quadruple[] {
                  ir.push({ line: node.line, column: node.column, op: 'ARG', arg1: null, arg2: null, result: p }); 
              }
           });
+          
+          const oldLoopStack = [...loopStack];
+          const oldFinallyStack = [...finallyStack];
+          loopStack.length = 0;
+          finallyStack.length = 0;
+          
           gen(node.body);
+          
+          loopStack.push(...oldLoopStack);
+          finallyStack.push(...oldFinallyStack);
+          
           // Implicit return if missing
           ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: '0', arg2: null, result: null });
           ir.push({ line: node.line, column: node.column, op: 'FUNC_END', arg1: null, arg2: null, result: node.name });
@@ -579,12 +644,18 @@ export function generateIR(ast: Program): Quadruple[] {
           
           // Assign the function closure to a variable
           const flags = `false,${!!node.async},${!!node.generator}`;
+          ir.push({ line: node.line, column: node.column, op: 'DECLARE', arg1: 'undefined', arg2: 'var', result: node.name });
           ir.push({ line: node.line, column: node.column, op: 'CLOSURE', arg1: `"${node.name}"`, arg2: flags, result: node.name });
           return node.name;
       }
 
       case ASTNodeType.ReturnStatement: {
           const val = node.argument ? gen(node.argument) : '0';
+          
+          for (let i = finallyStack.length - 1; i >= 0; i--) {
+              gen(finallyStack[i].node);
+          }
+          
           ir.push({ line: node.line, column: node.column, op: 'RETURN', arg1: val, arg2: null, result: null });
           return null;
       }

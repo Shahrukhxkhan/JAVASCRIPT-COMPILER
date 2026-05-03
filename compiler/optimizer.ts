@@ -260,7 +260,7 @@ function inlineFunctions(ir: Quadruple[]): Quadruple[] {
           const suffix = `_inline_${i}`;
           // Map params to args
           func.params.forEach((param, idx) => {
-            newIR.push({ op: 'ASSIGN', arg1: params[idx], arg2: null, result: param + suffix, line: callQ.line, column: callQ.column });
+            newIR.push({ op: 'DECLARE', arg1: params[idx], arg2: 'let', result: param + suffix, line: callQ.line, column: callQ.column });
           });
           const endLabel = newLabel();
           // Add body with renamed variables

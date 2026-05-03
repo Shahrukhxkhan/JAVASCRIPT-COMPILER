@@ -51,7 +51,7 @@ export interface Quadruple {
 export interface Instruction {
   op: OpCode;
   operand?: any;
-  argCount?: number;
+  argCount?: number | string;
   line?: number;
   column?: number;
 }

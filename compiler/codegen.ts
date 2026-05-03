@@ -4,7 +4,7 @@ import { OpCode } from '../constants';
 export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[], labels: Map<string, number> } {
   const instructions: Instruction[] = [];
   const labelMap = new Map<string, number>();
-  const jumpsToFix: { index: number, label: string }[] = [];
+  const jumpsToFix: { index: number, label: string, property?: string }[] = [];
 
   function pushOperand(operand: string | null, q: Quadruple) {
       if (operand === null) return;
@@ -227,8 +227,9 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         break;
 
       case 'TRY_START':
-        instructions.push({ line: q.line, column: q.column, op: OpCode.TRY_START, operand: -1 });
-        if(q.result) jumpsToFix.push({ index: instructions.length - 1, label: q.result });
+        if(q.arg1) jumpsToFix.push({ index: instructions.length, label: q.arg1.slice(1, -1), property: 'catchLabel' });
+        if(q.arg2) jumpsToFix.push({ index: instructions.length, label: q.arg2.slice(1, -1), property: 'finallyLabel' });
+        instructions.push({ line: q.line, column: q.column, op: OpCode.TRY_START, operand: { catchLabel: null, finallyLabel: null } });
         break;
 
       case 'TRY_END':
@@ -238,6 +239,10 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
       case 'THROW':
         pushOperand(q.arg1, q);
         instructions.push({ line: q.line, column: q.column, op: OpCode.THROW });
+        break;
+
+      case 'FINALLY_END':
+        instructions.push({ line: q.line, column: q.column, op: OpCode.FINALLY_END });
         break;
 
       case 'TEMPLATE': {
@@ -288,10 +293,15 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
 
-      case 'CLOSURE':
-        instructions.push({ line: q.line, column: q.column, op: OpCode.CLOSURE, operand: { label: q.arg1?.replace(/^"|"$/g, ''), isArrow: q.arg2 === 'true' } });
+      case 'CLOSURE': {
+        const flags = q.arg2 ? q.arg2.split(',') : ['false'];
+        const isArrow = flags[0] === 'true';
+        const isAsync = flags[1] === 'true';
+        const isGenerator = flags[2] === 'true';
+        instructions.push({ line: q.line, column: q.column, op: OpCode.CLOSURE, operand: { label: q.arg1?.replace(/^"|"$/g, ''), isArrow, isAsync, isGenerator } });
         instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
         break;
+      }
 
       case 'ASSIGN':
         pushOperand(q.arg1, q);
@@ -352,7 +362,7 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
         break;
 
       case 'ARG':
-        if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.STORE, operand: q.result });
+        if(q.result) instructions.push({ line: q.line, column: q.column, op: OpCode.DECLARE, operand: { name: q.result, kind: 'let' } });
         break;
 
       case 'YIELD':
@@ -375,7 +385,11 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
   // Backpatch jumps
   for (const fix of jumpsToFix) {
       if (labelMap.has(fix.label)) {
-          instructions[fix.index].operand = labelMap.get(fix.label);
+          if (fix.property) {
+              instructions[fix.index].operand[fix.property] = labelMap.get(fix.label);
+          } else {
+              instructions[fix.index].operand = labelMap.get(fix.label);
+          }
       }
   }
 
