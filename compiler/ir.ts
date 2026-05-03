@@ -668,18 +668,18 @@ export function generateIR(ast: Program): Quadruple[] {
 
       case ASTNodeType.ClassDeclaration: {
         const classTemp = newTemp();
-        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: '0', arg2: '', result: classTemp });
+        ir.push({ line: node.line, column: node.column, op: 'OBJECT', arg1: '', arg2: '', result: classTemp });
         
         if (node.superClass) {
           ir.push({ line: node.line, column: node.column, op: 'EXTENDS', arg1: node.superClass, arg2: classTemp, result: null });
         }
 
-        ir.push({ line: node.line, column: node.column, op: 'ASSIGN', arg1: classTemp, arg2: null, result: node.name });
+        ir.push({ line: node.line, column: node.column, op: 'DECLARE', arg1: classTemp, arg2: 'const', result: node.name });
         
         node.body.forEach((member: ASTNode) => {
           if (member.type === ASTNodeType.FunctionDeclaration) {
             const funcName = gen(member);
-            ir.push({ line: node.line, column: node.column, op: 'SET_PROP', arg1: classTemp, arg2: member.name, result: funcName });
+            ir.push({ line: node.line, column: node.column, op: 'SET_PROP', arg1: classTemp, arg2: `"${member.name}"`, result: funcName });
           }
         });
         return classTemp;

@@ -11,68 +11,57 @@ import { VM } from './compiler/vm';
 import { CompilerResult } from './types';
 
 const INITIAL_CODE = `
-// 1. if, else if, else
-let x = 15;
-if (x < 10) {
-  print("x is less than 10");
-} else if (x == 15) {
-  print("x is exactly 15");
-} else {
-  print("x is something else");
+// 1. Functions & Closures
+function makeCounter(start) {
+  let count = start;
+  return function() {
+    count = count + 1;
+    return count;
+  };
 }
 
-// 2. while loop
-let count = 0;
-while (count < 3) {
-  print("while loop count: " + count);
-  count = count + 1;
-}
+let counter = makeCounter(10);
+print("Counter: " + counter()); // 11
+print("Counter: " + counter()); // 12
 
-// 3. do...while loop
-let dCount = 0;
-do {
-  print("do-while loop count: " + dCount);
-  dCount = dCount + 1;
-} while (dCount < 2);
-
-// 4. for loop with break and continue
-for (let i = 0; i < 5; i = i + 1) {
-  if (i == 1) {
-    continue;
+// 2. Classes
+class Animal {
+  constructor(name) {
+    this.name = name;
   }
-  if (i == 3) {
-    break;
+  speak() {
+    print(this.name + " makes a noise.");
   }
-  print("for loop i: " + i);
 }
 
-// 5. switch statement
-let fruit = "apple";
-switch (fruit) {
-  case "banana":
-    print("It's a banana");
-    break;
-  case "apple":
-    print("It's an apple");
-    break;
-  default:
-    print("Unknown fruit");
+class Dog extends Animal {
+  speak() {
+    print(this.name + " barks!");
+  }
 }
 
-// 6. Ternary operator
-let age = 20;
-let status = age >= 18 ? "Adult" : "Minor";
-print("Status: " + status);
+let d = new Dog("Rex");
+d.speak();
 
-// 7. try, catch, finally, throw
+// 3. Arrays and Objects
+let testArr = [1, 2, 3];
+for (let i of testArr) {
+  print("Array item: " + i);
+}
+
+let person = {
+  name: "Alice",
+  age: 25
+};
+print("Person name: " + person.name);
+
+// 4. Try-catch
 try {
-  print("Inside try block");
-  throw "Custom Error!";
-  print("This should not print");
+  throw "Oops!";
 } catch (e) {
-  print("Caught error: " + e);
+  print("Caught: " + e);
 } finally {
-  print("Inside finally block");
+  print("Finally block ran");
 }
 `.trim();
 

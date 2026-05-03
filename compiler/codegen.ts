@@ -221,7 +221,7 @@ export function generateBytecode(ir: Quadruple[]): { instructions: Instruction[]
 
       case 'SET_PROP':
         pushOperand(q.arg1, q);
-        instructions.push({ line: q.line, column: q.column, op: OpCode.CONST, operand: q.arg2 });
+        pushOperand(q.arg2, q);
         pushOperand(q.result, q); // result is the value to set
         instructions.push({ line: q.line, column: q.column, op: OpCode.SET_PROP });
         break;
